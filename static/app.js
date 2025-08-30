@@ -33,6 +33,7 @@ let selection = [];
 let beforeReports = new Map(); // original_name -> report_text
 let afterReports = new Map();  // cleaned_name -> report_text
 let cleanedMap = new Map();    // original_name -> cleaned_name
+let hasInspected = false;      // **NEW**: Track if user has inspected before cleaning
 
 // ---------- Helper Functions ----------
 const fmtBytes = (n) => {
@@ -71,7 +72,7 @@ async function buildThumb(item) {
             const thumbDataUrl = await captureVideoFrame(item.thumbUrl);
             item.thumb = `<img class="thumb video" src="${thumbDataUrl}" alt="preview">`;
         } catch {
-            item.thumb = `<span class="thumb">${iconFor(item.kind)}</span>`; // Fallback icon
+            item.thumb = `<span class="thumb">${iconFor(item.kind)}</span>`;
         }
     } else {
         item.thumb = `<span class="thumb">${iconFor(item.kind)}</span>`;
@@ -86,9 +87,7 @@ function captureVideoFrame(objectURL) {
         video.src = objectURL;
         video.crossOrigin = 'anonymous';
 
-        video.addEventListener('loadeddata', () => {
-            video.currentTime = 0.1; // Seek to a very early frame
-        }, { once: true });
+        video.addEventListener('loadeddata', () => { video.currentTime = 0.1; }, { once: true });
 
         video.addEventListener('seeked', () => {
             const canvas = document.createElement('canvas');
@@ -98,7 +97,7 @@ function captureVideoFrame(objectURL) {
             const ctx = canvas.getContext('2d');
             ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
             resolve(canvas.toDataURL('image/jpeg'));
-            URL.revokeObjectURL(video.src); // Clean up
+            URL.revokeObjectURL(video.src);
         }, { once: true });
         
         video.addEventListener('error', (e) => reject(e), { once: true });
@@ -131,8 +130,8 @@ const clearUI = () => {
     beforeReports.clear();
     afterReports.clear();
     cleanedMap.clear();
+    hasInspected = false; // **NEW**: Reset inspection state
 
-    // **CHANGE**: Reset button text
     btnInspect.textContent = 'Inspect Original';
 };
 
@@ -146,7 +145,7 @@ const renderFileList = () => {
     ).join('');
 };
 
-const updateInspectView = async () => {
+const updateInspectView = async (switchToTab = null) => {
     const selectedFile = inspectSelect.value;
     if (!selectedFile) return;
 
@@ -181,6 +180,17 @@ const updateInspectView = async () => {
         inspectDiff.textContent = '';
         afterTab.disabled = true;
         diffTab.disabled = true;
+    }
+
+    // **NEW**: Logic to switch to a specific tab
+    if (switchToTab) {
+        const targetTab = document.querySelector(`.tab[data-tab="${switchToTab}"]`);
+        if (targetTab && !targetTab.disabled) {
+            tabs.forEach(t => t.classList.remove('active'));
+            targetTab.classList.add('active');
+            Object.values(panels).forEach(p => p.classList.remove('show'));
+            panels[switchToTab].classList.add('show');
+        }
     }
 };
 
@@ -226,21 +236,14 @@ const handleFiles = (files) => {
 };
 
 dropZone.addEventListener('click', () => fileInput.click());
-dropZone.addEventListener('dragover', (e) => {
-    e.preventDefault();
-    dropZone.classList.add('dragover');
-});
+dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.classList.add('dragover'); });
 dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
 dropZone.addEventListener('drop', (e) => {
     e.preventDefault();
     dropZone.classList.remove('dragover');
-    if (e.dataTransfer.files.length) {
-        handleFiles(e.dataTransfer.files);
-    }
+    if (e.dataTransfer.files.length) handleFiles(e.dataTransfer.files);
 });
-fileInput.addEventListener('change', () => {
-    if (fileInput.files.length) handleFiles(fileInput.files);
-});
+fileInput.addEventListener('change', () => { if (fileInput.files.length) handleFiles(fileInput.files); });
 
 fileListEl.addEventListener('click', (e) => {
     if (e.target.classList.contains('remove')) {
@@ -273,6 +276,18 @@ btnInspect.addEventListener('click', async () => {
     statusEl.textContent = 'Inspecting files...';
     btnInspect.disabled = true;
 
+    // **CHANGE**: If the button says "Inspect Results", just show the panel and switch to diff tab.
+    if (btnInspect.textContent === 'Inspect Results') {
+        outputSection.classList.remove('hidden');
+        inspectPane.classList.remove('hidden');
+        resultDownloads.classList.remove('hidden'); // Ensure downloads stay visible
+        await updateInspectView('diff'); // Switch to diff tab
+        statusEl.textContent = 'Inspection complete.';
+        btnInspect.disabled = false;
+        return;
+    }
+
+    // Original inspect logic
     inspectSelect.innerHTML = '';
     beforeReports.clear();
     
@@ -297,8 +312,9 @@ btnInspect.addEventListener('click', async () => {
 
     outputSection.classList.remove('hidden');
     inspectPane.classList.remove('hidden');
-    resultDownloads.classList.add('hidden'); 
+    resultDownloads.classList.add('hidden'); // Hide downloads during initial inspect
     
+    hasInspected = true; // **NEW**: Set inspection flag
     await updateInspectView();
     
     statusEl.textContent = `Inspection complete for ${selection.length} file(s).`;
@@ -335,50 +351,31 @@ btnClean.addEventListener('click', async () => {
             downloadLink.href = result.download;
             downloadLink.download = result.suggested_filename;
             singleResult.classList.remove('hidden');
-            batchResult.classList.add('hidden');
+            batchResult.classList.remove('hidden');
         }
         
-        // --- NEW LOGIC STARTS HERE ---
-        
-        // 1. Show both downloads and inspect pane
         outputSection.classList.remove('hidden');
         resultDownloads.classList.remove('hidden');
-        inspectPane.classList.remove('hidden');
-
-        // 2. Change the inspect button text
-        btnInspect.textContent = 'Inspect Results';
         
-        // 3. Ensure "before" reports are loaded, in case user only clicked "Clean"
-        if (beforeReports.size === 0) {
-            statusEl.textContent = 'Fetching original reports for comparison...';
-            await Promise.all(selection.map(async s => {
-                const formData = new FormData();
-                formData.append('upload', s.file);
-                try {
-                    const res = await fetch('/inspect', { method: 'POST', body: formData });
-                    const json = await res.json();
-                    beforeReports.set(s.file.name, json.report || '');
-                } catch (e) {
-                    beforeReports.set(s.file.name, `<Inspect failed: ${e.message}>`);
-                }
-            }));
+        // **CHANGE**: Only show inspect pane if user inspected before cleaning
+        if (hasInspected) {
+            inspectPane.classList.remove('hidden');
+            btnInspect.textContent = 'Inspect Results';
+            
+            if (inspectSelect.options.length === 0) {
+                selection.forEach(s => {
+                    const opt = document.createElement('option');
+                    opt.value = s.file.name;
+                    opt.textContent = s.file.name;
+                    inspectSelect.appendChild(opt);
+                });
+            }
+            await updateInspectView();
+        } else {
+            inspectPane.classList.add('hidden');
         }
-
-        // 4. Populate inspect dropdown if it's empty
-        if (inspectSelect.options.length === 0) {
-            selection.forEach(s => {
-                const opt = document.createElement('option');
-                opt.value = s.file.name;
-                opt.textContent = s.file.name;
-                inspectSelect.appendChild(opt);
-            });
-        }
-        
-        // 5. Update the view to show before/after/diff
-        await updateInspectView();
 
         statusEl.textContent = 'Cleaning complete!';
-        // --- NEW LOGIC ENDS HERE ---
 
     } catch (error) {
         statusEl.textContent = `Error: ${error.message}`;
@@ -386,7 +383,6 @@ btnClean.addEventListener('click', async () => {
         btnClean.disabled = false;
     }
 });
-
 
 // ---------- Inspect Panel Event Listeners ----------
 inspectSelect.addEventListener('change', updateInspectView);
