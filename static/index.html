@@ -1,88 +1,64 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="utf-8" />
-  <title>Aintivirus Metadata Remover</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <link href="/static/styles.css" rel="stylesheet" />
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Metadata Scrubber</title>
+  <link rel="stylesheet" href="static/styles.css">
 </head>
 <body>
-  <main class="container">
-    <h1>Remove Metadata (Images, Docs & Videos)</h1>
-    <p class="sub">
-      Drop files below (JPG, PNG, GIF, TIFF, DOCX, XLSX, PDF, MP4, MOV, M4V, AVI, MKV, WEBM).
-      Files auto-delete after ~20 minutes.
-    </p>
+  <div class="container">
+    <h1>Metadata Scrubber</h1>
 
-    <div id="drop" class="drop" aria-label="Drop files here or click to choose" role="button" tabindex="0">
-      Drop files here or click to choose
+    <!-- Drag and Drop Area -->
+    <div id="drop" class="drop" tabindex="0">
+      <p>Drop files here or click to choose</p>
     </div>
-    <input id="file" type="file" class="hidden" multiple />
 
-    <!-- Visual file list -->
-    <ul id="fileList" class="filelist" aria-live="polite"></ul>
+    <!-- File List -->
+    <ul id="fileList" class="filelist"></ul>
+
+    <!-- Inspecting/Processing -->
+    <div id="status" class="status"></div>
+
+    <!-- Inspect Tabs -->
+    <div class="tabs">
+      <button class="tab active" data-tab="before">Inspect Before</button>
+      <button class="tab" data-tab="after">Inspect After</button>
+      <button class="tab" data-tab="diff">Only Removed</button>
+    </div>
+    
+    <!-- Inspect Section -->
+    <div id="inspectPane" class="inspect hidden">
+      <select id="inspectSelect"></select>
+      <div id="panel-before" class="panel show">
+        <pre id="inspectBefore"></pre>
+      </div>
+      <div id="panel-after" class="panel">
+        <pre id="inspectAfter"></pre>
+      </div>
+      <div id="panel-diff" class="panel">
+        <pre id="inspectDiff"></pre>
+      </div>
+    </div>
+
+    <!-- Results -->
+    <div id="result" class="hidden">
+      <div id="singleResult">
+        <button id="downloadLink">Download Clean File</button>
+      </div>
+      <div id="batchResult" class="hidden">
+        <button id="zipLink">Download ZIP</button>
+      </div>
+    </div>
 
     <!-- Actions -->
     <div class="actions">
-      <button id="btnInspect" class="button secondary" disabled>Inspect selected (before)</button>
-      <button id="btnClean" class="button" disabled>Clean</button>
-      <button id="btnReset" class="button ghost" disabled>Start over</button>
+      <button id="btnInspect" class="button">Inspect</button>
+      <button id="btnClean" class="button">Clean</button>
+      <button id="btnReset" class="button">Start Over</button>
     </div>
-
-    <div id="status" class="status"></div>
-
-    <!-- Results -->
-    <div id="result" class="result hidden">
-      <div id="singleResult" class="hidden">
-        <p>✅ Cleaned. Click to download:</p>
-        <button id="downloadLink" class="button" download>Download Clean File</button>
-        <button id="btnInspectAfter" class="button secondary">Inspect cleaned (after)</button>
-      </div>
-
-      <div id="batchResult" class="hidden">
-        <p>✅ Batch cleaned.</p>
-        <button id="zipLink" class="button" download>Download ZIP</button>
-        <div id="list"></div>
-      </div>
-    </div>
-
-    <!-- Inspect -->
-    <section id="inspectPane" class="inspect hidden" aria-live="polite">
-      <div class="inspect-head">
-        <h2>Inspect (metadata report)</h2>
-        <div class="inspect-controls">
-          <label>
-            File:
-            <select id="inspectSelect"></select>
-          </label>
-          <label class="wrap-toggle">
-            <input type="checkbox" id="wrapToggle" checked />
-            Wrap long lines
-          </label>
-        </div>
-      </div>
-
-      <!-- On wide screens: 2 columns; on small: tabs -->
-      <div class="tabs">
-        <button class="tab active" data-tab="before">Before</button>
-        <button class="tab" data-tab="after">After</button>
-        <button class="tab" data-tab="diff">Only Removed</button>
-      </div>
-
-      <div class="inspect-grid">
-        <div id="panel-before" class="panel show">
-          <pre id="inspectBefore" class="pre wrap"></pre>
-        </div>
-        <div id="panel-after" class="panel">
-          <pre id="inspectAfter" class="pre wrap"></pre>
-        </div>
-        <div id="panel-diff" class="panel">
-          <pre id="inspectDiff" class="pre wrap"></pre>
-        </div>
-      </div>
-      <p class="hint">Diff shows lines removed by cleaning.</p>
-    </section>
-  </main>
-  <script src="/static/app.js"></script>
+  </div>
+  <script src="static/app.js"></script>
 </body>
 </html>
