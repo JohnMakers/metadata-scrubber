@@ -101,10 +101,11 @@ async function buildThumb(item) {
     try {
       item.thumb = await captureVideoFrame(item.url);
     } catch {
-      item.thumb = '';
+      item.thumb = ''; // If video decoding fails, leave empty thumbnail
     }
   }
 }
+
 
 function captureVideoFrame(objectURL) {
   return new Promise((resolve, reject) => {
@@ -196,7 +197,16 @@ btnReset.addEventListener('click', () => {
   setButtonsEnabled();
   clearUI();
   statusEl.textContent = 'Selection cleared.';
+
+  // Reset Inspect section
+  inspectBefore.textContent = '';
+  inspectAfter.textContent = '';
+  inspectDiff.textContent = '';
+  inspectSelect.innerHTML = ''; // Clear the inspect file list
+  downloadLink.removeAttribute('href'); // Remove download link
+  zipLink.removeAttribute('href'); // Remove ZIP download link
 });
+
 
 // ---------- Inspect (Before, After, Diff) ----------
 function setTabs() {
@@ -227,9 +237,8 @@ btnInspect.addEventListener('click', async () => {
   if (!selection.length) return;
   statusEl.textContent = `Inspecting ${selection.length} file(s) ...`;
   beforeReports.clear();
-
-  // Fetch reports per file (and populate selector)
-  inspectSelect.innerHTML = '';
+  
+  inspectSelect.innerHTML = ''; // Clear previous selections
   for (const s of selection) {
     const d = new FormData();
     d.append('upload', s.file);
@@ -246,14 +255,30 @@ btnInspect.addEventListener('click', async () => {
     }
   }
 
-  // Show first file’s report
+  // Show Before and After content (if available)
   inspectBefore.textContent = beforeReports.get(inspectSelect.value) || '';
-  inspectAfter.textContent = '';
-  inspectDiff.textContent = ''; // Don't show Diff initially
+  inspectAfter.textContent = afterReports.get(inspectSelect.value) || '';
+  inspectDiff.textContent = ''; // Show diff only if file was cleaned
+  
   inspectPane.classList.remove('hidden');
   setTabs();
   statusEl.textContent = '';
 });
+
+btnInspectAfter.addEventListener('click', async () => {
+  const fileName = inspectSelect.value;
+  if (!fileName) return;
+  
+  const cleanedFile = cleanedMap.get(fileName);
+  if (!cleanedFile) { inspectAfter.textContent = '(no cleaned output found for this file)'; return; }
+
+  const res = await fetch(`/inspect-output/${encodeURIComponent(cleanedFile)}`);
+  const json = await res.json();
+  afterReports.set(cleanedFile, json.report || '');
+  inspectAfter.textContent = afterReports.get(cleanedFile) || '';
+});
+
+
 
 // ETA Timer
 let progressInterval;
