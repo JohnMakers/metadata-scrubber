@@ -35,11 +35,9 @@ def home():
 def _secure_ext(filename: str) -> str:
     return Path(filename).suffix.lower()
 
-def _enforce_size_limit(upload_file: UploadFile) -> bytes:
-    data = upload_file.file.read()
+def _enforce_size_limit(data: bytes) -> None:
     if len(data) > MAX_FILE_SIZE:
         raise HTTPException(status_code=413, detail=f"File too large. Limit is {MAX_FILE_SIZE} bytes.")
-    return data
 
 def _verify_signature(data: bytes, filename: str) -> None:
     claimed = Path(filename).suffix.lower()
@@ -63,69 +61,8 @@ def _choose_cleaner(ext: str):
         return "video"
     raise HTTPException(status_code=400, detail="Unsupported file type for this MVP.")
 
-
-@app.post("/clean")
-def clean(upload: UploadFile = File(...)):
-    """
-    1) Check extension and size
-    2) Save to uploads
-    3) Clean into outputs
-    4) Return a download link
-    """
-    ext = _secure_ext(upload.filename)
-    if ext not in ALLOWED_EXTENSIONS:
-        raise HTTPException(status_code=400, detail=f"Extension {ext} not allowed for this MVP.")
-
-    data = _enforce_size_limit(upload)
-    _verify_signature(data, upload.filename)
-    # Create unique filenames to avoid collisions
-    uid = uuid.uuid4().hex
-    src_path = UPLOAD_DIR / f"{uid}{ext}"
-    dst_path = OUTPUT_DIR / f"{uid}_clean{ext}"
-
-    # Write original upload to disk
-    src_path.write_bytes(data)
-
-    # Run cleanup (defense-in-depth)
-    cleaner = _choose_cleaner(ext)
-    try:
-        if cleaner == "image":
-            clean_image(src_path, dst_path)
-        elif cleaner == "office":
-            clean_office(src_path, dst_path)
-        elif cleaner == "pdf":
-            clean_pdf(src_path, dst_path)
-        elif cleaner == "video":
-            clean_video(src_path, dst_path)
-        else:
-            raise HTTPException(status_code=500, detail="Unknown cleaner.")
-    except FileNotFoundError as e:
-        # Common when exiftool isn't installed
-        raise HTTPException(status_code=500, detail="Server missing dependency (exiftool). Please install and restart.") from e
-    except Exception as e:
-        # On failure, remove partial outputs if any
-        if dst_path.exists():
-            dst_path.unlink(missing_ok=True)
-        raise HTTPException(status_code=500, detail=f"Cleaning failed: {e!s}") from e
-    finally:
-        # Trigger a quick cleanup pass (best effort)
-        cleanup_once()
-
-    # Send a nice filename for the browser download prompt
-    proposed_name = f"{Path(upload.filename).stem}_clean{ext}"
-    return {
-        "download": f"/download/{dst_path.name}",
-        "suggested_filename": proposed_name
-    }
-
 @app.post("/clean-batch")
-def clean_batch(uploads: List[UploadFile] = File(...)):
-    """
-    Accepts multiple files. Cleans each. If >1 output, returns a ZIP download.
-    Response:
-      - when 1 file: { download, suggested_filename, items: [...] }
-      - when many : { zip_download, items: [{orig, cleaned_name, download}], count }
-    """
+async def clean_batch(uploads: List[UploadFile] = File(...)):
     if not uploads:
         raise HTTPException(status_code=400, detail="No files uploaded.")
 
@@ -134,8 +71,11 @@ def clean_batch(uploads: List[UploadFile] = File(...)):
     for up in uploads:
         ext = _secure_ext(up.filename)
         if ext not in ALLOWED_EXTENSIONS:
-            raise HTTPException(status_code=400, detail=f"Extension {ext} not allowed.")
-        data = _enforce_size_limit(up)
+            # Skip invalid files in a batch context or raise an error
+            continue
+
+        data = await up.read()
+        _enforce_size_limit(data)
         _verify_signature(data, up.filename)
 
         src_path = UPLOAD_DIR / f"{uid}_{uuid.uuid4().hex}{ext}"
@@ -152,17 +92,22 @@ def clean_batch(uploads: List[UploadFile] = File(...)):
                 clean_pdf(src_path, dst_path)
             elif cleaner == "video":
                 clean_video(src_path, dst_path)
-            else:
-                raise HTTPException(status_code=500, detail="Unknown cleaner.")
+            
             results.append({
                 "orig": up.filename,
                 "cleaned_name": dst_path.name,
                 "download": f"/download/{dst_path.name}"
             })
+        except Exception as e:
+            # Optionally log the error and continue with other files
+            print(f"Failed to clean {up.filename}: {e}")
         finally:
             cleanup_once()
 
-    # Single file: mirror /clean response for convenience
+    if not results:
+         raise HTTPException(status_code=400, detail="All uploaded files were invalid or failed to process.")
+
+    # Single file success: mirror /clean response for convenience
     if len(results) == 1:
         item = results[0]
         return {
@@ -172,13 +117,13 @@ def clean_batch(uploads: List[UploadFile] = File(...)):
         }
 
     # Multiple: build a ZIP in outputs
-    zip_name = f"{uid}_cleaned.zip"
+    zip_name = f"{uid}_cleaned_files.zip"
     zip_path = OUTPUT_DIR / zip_name
     with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as z:
         for item in results:
-            # Name inside zip should be the cleaned file's nice name (not UUID)
             file_path = OUTPUT_DIR / item["cleaned_name"]
-            z.write(file_path, arcname=item["cleaned_name"])
+            if file_path.exists():
+                z.write(file_path, arcname=item["cleaned_name"])
 
     return {
         "zip_download": f"/download/{zip_name}",
@@ -186,14 +131,11 @@ def clean_batch(uploads: List[UploadFile] = File(...)):
         "count": len(results)
     }
 
+
 @app.post("/inspect")
-def inspect(upload: UploadFile = File(...)):
-    """
-    Returns exiftool raw output for the uploaded file.
-    Useful for verifying before/after without local tools.
-    """
+async def inspect(upload: UploadFile = File(...)):
     ext = Path(upload.filename).suffix.lower()
-    data = upload.file.read()
+    data = await upload.read()
     tmp = UPLOAD_DIR / f"inspect_{uuid.uuid4().hex}{ext}"
     tmp.write_bytes(data)
     try:
@@ -202,24 +144,20 @@ def inspect(upload: UploadFile = File(...)):
     except FileNotFoundError:
         raise HTTPException(status_code=500, detail="Server missing exiftool.")
     finally:
-        tmp.unlink(missing_ok=True)
-
+        if tmp.exists():
+            tmp.unlink()
 
 @app.get("/download/{name}")
 def download(name: str):
     path = OUTPUT_DIR / name
-    if not path.exists():
+    if not path.is_file(): # More secure check
         raise HTTPException(status_code=404, detail="File not found (maybe it expired and was deleted).")
-    # Force "download" behavior with correct filename
     return FileResponse(path, media_type="application/octet-stream", filename=name)
 
 @app.get("/inspect-output/{name}")
 def inspect_output(name: str):
-    """
-    Runs exiftool on a file in OUTPUT_DIR, returns raw report text.
-    """
     path = OUTPUT_DIR / name
-    if not path.exists():
+    if not path.is_file():
         raise HTTPException(status_code=404, detail="File not found (maybe expired).")
     try:
         out = subprocess.run(["exiftool", str(path)], check=True, capture_output=True, text=True).stdout
