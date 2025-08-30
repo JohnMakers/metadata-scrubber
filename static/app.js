@@ -60,6 +60,51 @@ const revokeURLs = (items) => {
     });
 };
 
+// ---------- Thumbnail Generation ----------
+async function buildThumb(item) {
+    if (item.kind === 'image') {
+        item.thumbUrl = URL.createObjectURL(item.file);
+        item.thumb = `<img class="thumb" src="${item.thumbUrl}" alt="preview">`;
+    } else if (item.kind === 'video') {
+        item.thumbUrl = URL.createObjectURL(item.file);
+        try {
+            const thumbDataUrl = await captureVideoFrame(item.thumbUrl);
+            item.thumb = `<img class="thumb video" src="${thumbDataUrl}" alt="preview">`;
+        } catch {
+            item.thumb = `<span class="thumb">${iconFor(item.kind)}</span>`; // Fallback icon
+        }
+    } else {
+        item.thumb = `<span class="thumb">${iconFor(item.kind)}</span>`;
+    }
+}
+
+function captureVideoFrame(objectURL) {
+    return new Promise((resolve, reject) => {
+        const video = document.createElement('video');
+        video.preload = 'metadata';
+        video.muted = true;
+        video.src = objectURL;
+        video.crossOrigin = 'anonymous';
+
+        video.addEventListener('loadeddata', () => {
+            video.currentTime = 0.1; // Seek to a very early frame
+        }, { once: true });
+
+        video.addEventListener('seeked', () => {
+            const canvas = document.createElement('canvas');
+            const aspectRatio = video.videoWidth / video.videoHeight;
+            canvas.width = 80;
+            canvas.height = 80 / aspectRatio;
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+            resolve(canvas.toDataURL('image/jpeg'));
+            URL.revokeObjectURL(video.src); // Clean up
+        }, { once: true });
+        
+        video.addEventListener('error', (e) => reject(e), { once: true });
+    });
+}
+
 // ---------- UI Update Functions ----------
 const setButtonsEnabled = () => {
     const hasSelection = selection.length > 0;
@@ -91,7 +136,7 @@ const clearUI = () => {
 const renderFileList = () => {
     fileListEl.innerHTML = selection.map((s, i) => `
         <li class="file-chip" data-idx="${i}">
-            <span class="thumb">${iconFor(s.kind)}</span>
+            ${s.thumb || `<span class="thumb">${iconFor(s.kind)}</span>`}
             <span class="meta" title="${s.file.name}">${s.file.name} • ${fmtBytes(s.file.size)}</span>
             <button class="remove" title="Remove" aria-label="Remove ${s.file.name}">&times;</button>
         </li>`
@@ -157,14 +202,26 @@ const generateDiff = (before, after) => {
 
 // ---------- File Selection & Handling ----------
 const handleFiles = (files) => {
-    revokeURLs(selection);
-    clearUI();
-    selection = [...files].map(file => ({ file, id: crypto.randomUUID(), kind: inferKind(file) }));
+    clearUI(); // Clear results from previous actions
+    const newItems = [...files].map(file => ({ 
+        file, 
+        id: crypto.randomUUID(), 
+        kind: inferKind(file),
+        thumb: `<span class="thumb">${iconFor(inferKind(file))}</span>` // Default icon
+    }));
+
+    selection.push(...newItems); // Append new files instead of replacing
     
-    renderFileList();
+    renderFileList(); // Initial render with icons
     statusEl.textContent = `${selection.length} file(s) selected.`;
     setButtonsEnabled();
     fileInput.value = '';
+
+    // Asynchronously build thumbnails and re-render
+    newItems.forEach(async (item) => {
+        await buildThumb(item);
+        renderFileList();
+    });
 };
 
 dropZone.addEventListener('click', () => fileInput.click());
@@ -240,9 +297,9 @@ btnInspect.addEventListener('click', async () => {
 
     outputSection.classList.remove('hidden');
     inspectPane.classList.remove('hidden');
-    resultDownloads.classList.add('hidden'); // Ensure downloads are hidden
+    resultDownloads.classList.add('hidden'); 
     
-    await updateInspectView(); // Display first file's report
+    await updateInspectView();
     
     statusEl.textContent = `Inspection complete for ${selection.length} file(s).`;
     btnInspect.disabled = false;
@@ -254,40 +311,37 @@ btnClean.addEventListener('click', async () => {
     btnClean.disabled = true;
 
     const formData = new FormData();
-    selection.forEach(s => formData.append('files', s.file));
+    selection.forEach(s => formData.append('uploads', s.file)); // Changed to 'uploads'
     
     try {
-        const response = await fetch('/clean', { method: 'POST', body: formData });
-        if (!response.ok) throw new Error(`Server error: ${response.statusText}`);
+        const response = await fetch('/clean-batch', { method: 'POST', body: formData }); // Changed to /clean-batch
+        if (!response.ok) {
+            const err = await response.json();
+            throw new Error(err.detail || `Server error: ${response.statusText}`);
+        }
         
-        const blob = await response.blob();
-        const contentDisposition = response.headers.get('Content-Disposition');
-        const filenameMatch = contentDisposition?.match(/filename="(.+)"/);
-        const newName = filenameMatch ? filenameMatch[1] : 'cleaned-file';
+        const result = await response.json();
 
-        if (selection.length === 1) {
-            downloadLink.href = URL.createObjectURL(blob);
-            downloadLink.download = newName;
-            cleanedMap.set(selection[0].file.name, newName);
-            singleResult.classList.remove('hidden');
-            batchResult.classList.add('hidden');
-        } else {
-            zipLink.href = URL.createObjectURL(blob);
-            zipLink.download = newName;
-            const cleanedFilesHeader = response.headers.get('X-Cleaned-Files');
-            if (cleanedFilesHeader) {
-                const cleanedFiles = JSON.parse(cleanedFilesHeader);
-                for (const [original, cleaned] of Object.entries(cleanedFiles)) {
-                    cleanedMap.set(original, cleaned);
-                }
-            }
+        // Populate cleanedMap for inspection
+        result.items.forEach(item => {
+            cleanedMap.set(item.orig, item.cleaned_name);
+        });
+
+        if (result.zip_download) { // Batch result
+            zipLink.href = result.zip_download;
+            zipLink.download = result.zip_download.split('/').pop();
             singleResult.classList.add('hidden');
             batchResult.classList.remove('hidden');
+        } else { // Single file result
+            downloadLink.href = result.download;
+            downloadLink.download = result.suggested_filename;
+            singleResult.classList.remove('hidden');
+            batchResult.classList.add('hidden');
         }
         
         outputSection.classList.remove('hidden');
         resultDownloads.classList.remove('hidden');
-        inspectPane.classList.add('hidden'); // Hide inspect pane if it was open
+        inspectPane.classList.add('hidden'); 
         statusEl.textContent = 'Cleaning complete!';
 
     } catch (error) {
