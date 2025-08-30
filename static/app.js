@@ -30,10 +30,10 @@ const panels = {
 
 // ---------- State ----------
 let selection = [];
-let beforeReports = new Map(); // original_name -> report_text
-let afterReports = new Map();  // cleaned_name -> report_text
-let cleanedMap = new Map();    // original_name -> cleaned_name
-let hasInspected = false;      // **NEW**: Track if user has inspected before cleaning
+let beforeReports = new Map();
+let afterReports = new Map();
+let cleanedMap = new Map();
+let hasCleaned = false; // **NEW**: Track cleaning status
 
 // ---------- Helper Functions ----------
 const fmtBytes = (n) => {
@@ -86,9 +86,7 @@ function captureVideoFrame(objectURL) {
         video.muted = true;
         video.src = objectURL;
         video.crossOrigin = 'anonymous';
-
         video.addEventListener('loadeddata', () => { video.currentTime = 0.1; }, { once: true });
-
         video.addEventListener('seeked', () => {
             const canvas = document.createElement('canvas');
             const aspectRatio = video.videoWidth / video.videoHeight;
@@ -99,7 +97,6 @@ function captureVideoFrame(objectURL) {
             resolve(canvas.toDataURL('image/jpeg'));
             URL.revokeObjectURL(video.src);
         }, { once: true });
-        
         video.addEventListener('error', (e) => reject(e), { once: true });
     });
 }
@@ -130,7 +127,7 @@ const clearUI = () => {
     beforeReports.clear();
     afterReports.clear();
     cleanedMap.clear();
-    hasInspected = false; // **NEW**: Reset inspection state
+    hasCleaned = false; // Reset state
 
     btnInspect.textContent = 'Inspect Original';
 };
@@ -145,10 +142,25 @@ const renderFileList = () => {
     ).join('');
 };
 
-const updateInspectView = async (switchToTab = null) => {
+const updateInspectView = async (switchToTab = 'before') => {
     const selectedFile = inspectSelect.value;
     if (!selectedFile) return;
 
+    if (beforeReports.size === 0) {
+        statusEl.textContent = 'Fetching original reports...';
+        await Promise.all(selection.map(async s => {
+            const formData = new FormData();
+            formData.append('upload', s.file);
+            try {
+                const res = await fetch('/inspect', { method: 'POST', body: formData });
+                const json = await res.json();
+                beforeReports.set(s.file.name, json.report || '');
+            } catch (e) {
+                beforeReports.set(s.file.name, `<Inspect failed: ${e.message}>`);
+            }
+        }));
+        statusEl.textContent = '';
+    }
     inspectBefore.textContent = beforeReports.get(selectedFile) || 'Report not available.';
     
     const cleanedName = cleanedMap.get(selectedFile);
@@ -182,15 +194,12 @@ const updateInspectView = async (switchToTab = null) => {
         diffTab.disabled = true;
     }
 
-    // **NEW**: Logic to switch to a specific tab
-    if (switchToTab) {
-        const targetTab = document.querySelector(`.tab[data-tab="${switchToTab}"]`);
-        if (targetTab && !targetTab.disabled) {
-            tabs.forEach(t => t.classList.remove('active'));
-            targetTab.classList.add('active');
-            Object.values(panels).forEach(p => p.classList.remove('show'));
-            panels[switchToTab].classList.add('show');
-        }
+    const targetTab = document.querySelector(`.tab[data-tab="${switchToTab}"]`);
+    if (targetTab && !targetTab.disabled) {
+        tabs.forEach(t => t.classList.remove('active'));
+        targetTab.classList.add('active');
+        Object.values(panels).forEach(p => p.classList.remove('show'));
+        panels[switchToTab].classList.add('show');
     }
 };
 
@@ -198,17 +207,12 @@ const generateDiff = (before, after) => {
     const beforeLines = new Set(before.split('\n'));
     const afterLines = new Set(after.split('\n'));
     let diffHtml = '';
-    
     beforeLines.forEach(line => {
         if (line.trim() && !afterLines.has(line)) {
             diffHtml += `<span class="diff-line-removed">- ${line}</span>\n`;
         }
     });
-
-    if (!diffHtml) {
-        diffHtml = 'No metadata was removed.';
-    }
-
+    if (!diffHtml) diffHtml = 'No metadata was removed.';
     inspectDiff.innerHTML = diffHtml;
 };
 
@@ -216,19 +220,14 @@ const generateDiff = (before, after) => {
 const handleFiles = (files) => {
     clearUI();
     const newItems = [...files].map(file => ({ 
-        file, 
-        id: crypto.randomUUID(), 
-        kind: inferKind(file),
+        file, id: crypto.randomUUID(), kind: inferKind(file),
         thumb: `<span class="thumb">${iconFor(inferKind(file))}</span>`
     }));
-
     selection.push(...newItems);
-    
     renderFileList();
     statusEl.textContent = `${selection.length} file(s) selected.`;
     setButtonsEnabled();
     fileInput.value = '';
-
     newItems.forEach(async (item) => {
         await buildThumb(item);
         renderFileList();
@@ -244,13 +243,11 @@ dropZone.addEventListener('drop', (e) => {
     if (e.dataTransfer.files.length) handleFiles(e.dataTransfer.files);
 });
 fileInput.addEventListener('change', () => { if (fileInput.files.length) handleFiles(fileInput.files); });
-
 fileListEl.addEventListener('click', (e) => {
     if (e.target.classList.contains('remove')) {
         const idx = Number(e.target.closest('.file-chip').dataset.idx);
         revokeURLs([selection[idx]]);
         selection.splice(idx, 1);
-        
         renderFileList();
         statusEl.textContent = `${selection.length} file(s) selected.`;
         setButtonsEnabled();
@@ -276,48 +273,30 @@ btnInspect.addEventListener('click', async () => {
     statusEl.textContent = 'Inspecting files...';
     btnInspect.disabled = true;
 
-    // **CHANGE**: If the button says "Inspect Results", just show the panel and switch to diff tab.
-    if (btnInspect.textContent === 'Inspect Results') {
-        outputSection.classList.remove('hidden');
-        inspectPane.classList.remove('hidden');
-        resultDownloads.classList.remove('hidden'); // Ensure downloads stay visible
-        await updateInspectView('diff'); // Switch to diff tab
-        statusEl.textContent = 'Inspection complete.';
-        btnInspect.disabled = false;
-        return;
+    // Populate the dropdown if it's empty
+    if (inspectSelect.options.length === 0) {
+        selection.forEach(s => {
+            const opt = document.createElement('option');
+            opt.value = s.file.name;
+            opt.textContent = s.file.name;
+            inspectSelect.appendChild(opt);
+        });
     }
 
-    // Original inspect logic
-    inspectSelect.innerHTML = '';
-    beforeReports.clear();
-    
-    await Promise.all(selection.map(async s => {
-        const formData = new FormData();
-        formData.append('upload', s.file);
-        try {
-            const res = await fetch('/inspect', { method: 'POST', body: formData });
-            const json = await res.json();
-            beforeReports.set(s.file.name, json.report || '');
-        } catch (e) {
-            beforeReports.set(s.file.name, `<Inspect failed: ${e.message}>`);
-        }
-    }));
-
-    selection.forEach(s => {
-        const opt = document.createElement('option');
-        opt.value = s.file.name;
-        opt.textContent = s.file.name;
-        inspectSelect.appendChild(opt);
-    });
+    // Always show downloads if they exist
+    if (hasCleaned) {
+        resultDownloads.classList.remove('hidden');
+    } else {
+        resultDownloads.classList.add('hidden');
+    }
 
     outputSection.classList.remove('hidden');
     inspectPane.classList.remove('hidden');
-    resultDownloads.classList.add('hidden'); // Hide downloads during initial inspect
     
-    hasInspected = true; // **NEW**: Set inspection flag
-    await updateInspectView();
+    // Switch to diff tab if cleaned, otherwise before
+    await updateInspectView(hasCleaned ? 'diff' : 'before');
     
-    statusEl.textContent = `Inspection complete for ${selection.length} file(s).`;
+    statusEl.textContent = 'Inspection complete.';
     btnInspect.disabled = false;
 });
 
@@ -337,12 +316,10 @@ btnClean.addEventListener('click', async () => {
         }
         
         const result = await response.json();
+        result.items.forEach(item => cleanedMap.set(item.orig, item.cleaned_name));
 
-        result.items.forEach(item => {
-            cleanedMap.set(item.orig, item.cleaned_name);
-        });
-
-        if (result.zip_download) {
+        // **FIX**: Correctly show single vs. batch download links
+        if (selection.length > 1) {
             zipLink.href = result.zip_download;
             zipLink.download = result.zip_download.split('/').pop();
             singleResult.classList.add('hidden');
@@ -351,29 +328,15 @@ btnClean.addEventListener('click', async () => {
             downloadLink.href = result.download;
             downloadLink.download = result.suggested_filename;
             singleResult.classList.remove('hidden');
-            batchResult.classList.remove('hidden');
+            batchResult.classList.add('hidden');
         }
         
         outputSection.classList.remove('hidden');
         resultDownloads.classList.remove('hidden');
-        
-        // **CHANGE**: Only show inspect pane if user inspected before cleaning
-        if (hasInspected) {
-            inspectPane.classList.remove('hidden');
-            btnInspect.textContent = 'Inspect Results';
-            
-            if (inspectSelect.options.length === 0) {
-                selection.forEach(s => {
-                    const opt = document.createElement('option');
-                    opt.value = s.file.name;
-                    opt.textContent = s.file.name;
-                    inspectSelect.appendChild(opt);
-                });
-            }
-            await updateInspectView();
-        } else {
-            inspectPane.classList.add('hidden');
-        }
+        inspectPane.classList.add('hidden'); // Hide inspect by default after cleaning
+
+        hasCleaned = true; // **FIX**: Set clean status
+        btnInspect.textContent = 'Inspect Results'; // **FIX**: Update button text
 
         statusEl.textContent = 'Cleaning complete!';
 
@@ -385,7 +348,7 @@ btnClean.addEventListener('click', async () => {
 });
 
 // ---------- Inspect Panel Event Listeners ----------
-inspectSelect.addEventListener('change', updateInspectView);
+inspectSelect.addEventListener('change', () => updateInspectView(hasCleaned ? 'diff' : 'before'));
 
 tabs.forEach(tab => {
     tab.addEventListener('click', () => {
