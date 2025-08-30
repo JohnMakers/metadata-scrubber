@@ -15,8 +15,7 @@ RUN pip install --no-cache-dir --upgrade pip \
 # 3) Copy source
 COPY . .
 
-# 4) Entrypoint (Render/containers will pass PORT env var)
+# 4) Entrypoint (bind to Render's $PORT)
 ENV PYTHONUNBUFFERED=1
-ENV PORT=8000
 EXPOSE 8000
-CMD ["uvicorn", "app.server:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["sh","-c","uvicorn app.server:app --host 0.0.0.0 --port ${PORT:-8000}"]
