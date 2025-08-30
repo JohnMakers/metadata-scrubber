@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Aintivirus Metadata Remover</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link href="/static/styles.css" rel="stylesheet" />
+</head>
+<body>
+  <main class="container">
+    <h1>Remove Metadata (Images, Docs & Videos)</h1>
+    <p class="sub">
+      Drop files below (JPG, PNG, GIF, TIFF, DOCX, XLSX, PDF, MP4, MOV, M4V, AVI, MKV, WEBM).
+      Files auto-delete after ~20 minutes.
+    </p>
+
+    <div id="drop" class="drop" aria-label="Drop files here or click to choose" role="button" tabindex="0">
+      Drop files here or click to choose
+    </div>
+    <input id="file" type="file" class="hidden" multiple />
+
+    <!-- Visual file list -->
+    <ul id="fileList" class="filelist" aria-live="polite"></ul>
+
+    <!-- Actions -->
+    <div class="actions">
+      <button id="btnInspect" class="button secondary" disabled>Inspect selected (before)</button>
+      <button id="btnClean" class="button" disabled>Clean</button>
+      <button id="btnReset" class="button ghost" disabled>Start over</button>
+    </div>
+
+    <div id="status" class="status"></div>
+
+    <!-- Results -->
+    <div id="result" class="result hidden">
+      <div id="singleResult" class="hidden">
+        <p>✅ Cleaned. Click to download:</p>
+        <a id="downloadLink" class="button" download>Download clean file</a>
+        <button id="btnInspectAfter" class="button secondary">Inspect cleaned (after)</button>
+      </div>
+
+      <div id="batchResult" class="hidden">
+        <p>✅ Batch cleaned.</p>
+        <a id="zipLink" class="button">Download ZIP</a>
+        <div id="list"></div>
+      </div>
+    </div>
+
+    <!-- Inspect -->
+    <section id="inspectPane" class="inspect hidden" aria-live="polite">
+      <div class="inspect-head">
+        <h2>Inspect (metadata report)</h2>
+        <div class="inspect-controls">
+          <label>
+            File:
+            <select id="inspectSelect"></select>
+          </label>
+          <label class="wrap-toggle">
+            <input type="checkbox" id="wrapToggle" checked />
+            Wrap long lines
+          </label>
+        </div>
+      </div>
+
+      <!-- On wide screens: 2 columns; on small: tabs -->
+      <div class="tabs">
+        <button class="tab active" data-tab="before">Before</button>
+        <button class="tab" data-tab="after">After</button>
+        <button class="tab" data-tab="diff">Diff</button>
+      </div>
+
+      <div class="inspect-grid">
+        <div id="panel-before" class="panel show">
+          <pre id="inspectBefore" class="pre wrap"></pre>
+        </div>
+        <div id="panel-after" class="panel">
+          <pre id="inspectAfter" class="pre wrap"></pre>
+        </div>
+        <div id="panel-diff" class="panel">
+          <pre id="inspectDiff" class="pre wrap"></pre>
+        </div>
+      </div>
+      <p class="hint">Diff shows lines removed by cleaning.</p>
+    </section>
+  </main>
+  <script src="/static/app.js"></script>
+</body>
+</html>

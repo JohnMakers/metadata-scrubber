@@ -1,0 +1,74 @@
+/* ---------- ACTION BUTTONS ---------- */
+.actions { display:flex; flex-wrap:wrap; gap:.5rem; margin:.75rem 0 .25rem; }
+.button.secondary { background: transparent; color: var(--text); border: 1px solid var(--border); }
+.button.ghost { background: transparent; border: 1px dashed var(--border); color: var(--muted); }
+
+/* ---------- FILE LIST (visual chips) ---------- */
+.filelist { list-style:none; padding:0; margin:.5rem 0 0; display:flex; flex-wrap:wrap; gap:.5rem; }
+/* --- Thumbnails --- */
+.filechip {
+  display:flex; align-items:center; gap:.6rem; padding:.5rem .6rem;
+  border:1px solid var(--border); border-radius:12px; background:#0b120f;
+  max-width: 100%; overflow:hidden;
+}
+.filechip .thumb {
+  width:42px; height:42px; flex:0 0 42px;
+  border-radius:8px; background:#0e1512; border:1px solid var(--border);
+  object-fit: cover; display:inline-block;
+}
+.filechip .thumb.video {
+  position: relative;
+}
+.filechip .thumb.play::after {
+  content:"▶";
+  position:absolute; inset:auto; left:50%; top:50%;
+  transform:translate(-50%,-50%);
+  font-size:14px; line-height:1; color:#fff; text-shadow:0 1px 3px rgba(0,0,0,.6);
+}
+.filechip .icon { width:20px; height:20px; display:inline-grid; place-items:center; font-size:14px; }
+.filechip .meta { font-size:.9rem; color:var(--muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:44ch; }
+.filechip .remove { margin-left:.25rem; border:none; background:transparent; color:#ff8a8a; cursor:pointer; font-size:16px; line-height:1; }
+
+
+/* ---------- INSPECT ---------- */
+.inspect { margin-top: 1rem; }
+.inspect-head { display:flex; justify-content:space-between; align-items:center; gap:.75rem; flex-wrap:wrap; }
+.inspect-controls { display:flex; gap:.75rem; align-items:center; }
+.wrap-toggle { user-select:none; }
+.hint { color: var(--muted); font-size:.9rem; }
+
+.tabs { display:none; gap:.5rem; margin:.5rem 0; }
+.tab { padding:.4rem .7rem; border:1px solid var(--border); background:transparent; color:var(--text); border-radius:8px; }
+.tab.active { background:#0b120f; }
+
+.inspect-grid {
+  display:grid; grid-template-columns: minmax(0,1fr) minmax(0,1fr); gap:.75rem;
+}
+.panel { display:block; }
+.panel .pre { width:100%; }
+
+/* Prevent horizontal overflow; allow optional wrapping */
+.pre {
+  background: #0a0f0c; border: 1px solid var(--border); padding: .75rem;
+  border-radius: 10px; max-height: 320px; overflow:auto;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  white-space: pre;               /* default (no wrap) */
+  max-width: 100%;
+}
+.pre.wrap {
+  white-space: pre-wrap;          /* wrap long lines */
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+
+/* Diff colors */
+.del { color: #ff6b6b; }
+.add { color: #7ddc7d; }
+
+/* ---------- RESPONSIVE ---------- */
+@media (max-width: 900px) {
+  .inspect-grid { grid-template-columns: 1fr; }
+  .tabs { display:flex; }
+  .panel { display:none; }
+  .panel.show { display:block; }
+}
