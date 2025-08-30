@@ -1,271 +1,317 @@
-// Elements
-const drop = document.getElementById('drop');
-const input = document.getElementById('file');
-const fileList = document.getElementById('fileList');
+// ---------- Elements ----------
+const dropZone = document.getElementById('drop');
+const fileInput = document.getElementById('file-input');
+const fileListEl = document.getElementById('file-list');
 const statusEl = document.getElementById('status');
-const result = document.getElementById('result');
-const singleResult = document.getElementById('singleResult');
-const downloadLink = document.getElementById('downloadLink');
-const zipLink = document.getElementById('zipLink');
-const btnInspectAfter = document.getElementById('btnInspectAfter');
-const batchResult = document.getElementById('batchResult');
-const listEl = document.getElementById('list');
-const btnInspect = document.getElementById('btnInspect');
-const btnClean = document.getElementById('btnClean');
-const btnReset = document.getElementById('btnReset');
-const inspectPane = document.getElementById('inspectPane');
-const inspectSelect = document.getElementById('inspectSelect');
-const inspectBefore = document.getElementById('inspectBefore');
-const inspectAfter = document.getElementById('inspectAfter');
-const inspectDiff = document.getElementById('inspectDiff');
-const wrapToggle = document.getElementById('wrapToggle');
+
+const btnInspect = document.getElementById('btn-inspect');
+const btnClean = document.getElementById('btn-clean');
+const btnReset = document.getElementById('btn-reset');
+
+const outputSection = document.getElementById('output-section');
+const resultDownloads = document.getElementById('result-downloads');
+const singleResult = document.getElementById('single-result');
+const batchResult = document.getElementById('batch-result');
+const downloadLink = document.getElementById('download-link');
+const zipLink = document.getElementById('zip-link');
+
+const inspectPane = document.getElementById('inspect-pane');
+const inspectSelect = document.getElementById('inspect-select');
+const inspectBefore = document.getElementById('inspect-before');
+const inspectAfter = document.getElementById('inspect-after');
+const inspectDiff = document.getElementById('inspect-diff');
+const wrapToggle = document.getElementById('wrap-toggle');
 const tabs = document.querySelectorAll('.tab');
 const panels = {
-  before: document.getElementById('panel-before'),
-  after: document.getElementById('panel-after'),
-  diff: document.getElementById('panel-diff'),
+    before: document.getElementById('panel-before'),
+    after: document.getElementById('panel-after'),
+    diff: document.getElementById('panel-diff'),
 };
 
 // ---------- State ----------
 let selection = [];
-let beforeReports = new Map(); // name -> text
-let afterReports = new Map(); // cleaned_name -> text
-let lastCleaned = null;
-let cleanedMap = new Map(); // orig -> cleaned_name
+let beforeReports = new Map(); // original_name -> report_text
+let afterReports = new Map();  // cleaned_name -> report_text
+let cleanedMap = new Map();    // original_name -> cleaned_name
 
-// ---------- Helpers ----------
-function chooseFiles() { input.click(); }
-
-function fmtBytes(n) {
-  const u = ['B', 'KB', 'MB', 'GB'];
-  let i = 0;
-  let x = n;
-  while (x >= 1024 && i < u.length - 1) { x /= 1024; i++; }
-  return `${x.toFixed(x < 10 && i > 0 ? 1 : 0)} ${u[i]}`;
-}
-
-function inferKind(file) {
-  const ext = file.name.split('.').pop().toLowerCase();
-  if (['jpg', 'jpeg', 'png', 'gif', 'tif', 'tiff', 'webp', 'bmp'].includes(ext)) return 'image';
-  if (['mp4', 'mov', 'm4v', 'avi', 'mkv', 'webm'].includes(ext)) return 'video';
-  if (ext === 'pdf') return 'pdf';
-  if (['docx', 'xlsx'].includes(ext)) return 'doc';
-  return 'other';
-}
-
-function iconFor(kind) {
-  if (kind === 'image') return '🖼️';
-  if (kind === 'video') return '🎬';
-  if (kind === 'pdf') return '📄';
-  if (kind === 'doc') return '📑';
-  return '📁';
-}
-
-function setButtonsEnabled() {
-  const has = selection.length > 0;
-  btnInspect.disabled = !has;
-  btnClean.disabled = !has;
-  btnReset.disabled = !has;
-}
-
-function revokeURLs(items) {
-  for (const s of items) {
-    if (s.url) URL.revokeObjectURL(s.url);
-  }
-}
-
-function renderFileList() {
-  fileList.innerHTML = selection.map((s, i) => {
-    const thumb = s.thumb
-      ? `<img class="thumb${s.kind === 'video' ? ' video play' : ''}" src="${s.thumb}" alt="">`
-      : `<span class="thumb" aria-hidden="true" style="display:inline-grid;place-items:center;font-size:14px;">${iconFor(s.kind)}</span>`;
-    return `
-      <li class="filechip" data-idx="${i}">
-        ${thumb}
-        <span class="meta" title="${s.file.name} – ${fmtBytes(s.file.size)}">${s.file.name} • ${fmtBytes(s.file.size)}</span>
-        <button class="remove" title="Remove" aria-label="Remove ${s.file.name}">&times;</button>
-      </li>`;
-  }).join('');
-}
-
-async function buildThumb(item) {
-  if (item.kind === 'image') {
-    item.url = URL.createObjectURL(item.file);
-    item.thumb = item.url;
-    return;
-  }
-  if (item.kind === 'video') {
-    item.url = URL.createObjectURL(item.file);
-    try {
-      item.thumb = await captureVideoFrame(item.url);
-    } catch {
-      item.thumb = '';
+// ---------- Helper Functions ----------
+const fmtBytes = (n) => {
+    const units = ['B', 'KB', 'MB', 'GB'];
+    let i = 0;
+    while (n >= 1024 && i < units.length - 1) {
+        n /= 1024;
+        i++;
     }
-  }
-}
+    return `${n.toFixed(n < 10 && i > 0 ? 1 : 0)} ${units[i]}`;
+};
 
-function captureVideoFrame(objectURL) {
-  return new Promise((resolve, reject) => {
-    const v = document.createElement('video');
-    v.preload = 'metadata';
-    v.muted = true; v.src = objectURL; v.crossOrigin = 'anonymous';
+const inferKind = (file) => {
+    const ext = file.name.split('.').pop().toLowerCase();
+    if (['jpg', 'jpeg', 'png', 'gif', 'tif', 'tiff', 'webp', 'bmp'].includes(ext)) return 'image';
+    if (['mp4', 'mov', 'm4v', 'avi', 'mkv', 'webm'].includes(ext)) return 'video';
+    return 'other';
+};
 
-    const toImage = () => {
-      const c = document.createElement('canvas');
-      const w = 160, h = Math.max(90, Math.floor((v.videoHeight / v.videoWidth) * 160)) || 90;
-      c.width = 160; c.height = h;
-      const ctx = c.getContext('2d');
-      ctx.drawImage(v, 0, 0, 160, h);
-      try { resolve(c.toDataURL('image/jpeg', 0.7)); } catch (e) { reject(e); }
-      v.pause(); v.src = ''; v.load();
-    };
+const iconFor = (kind) => (kind === 'image' ? '🖼️' : kind === 'video' ? '🎬' : '📁');
 
-    v.addEventListener('loadedmetadata', () => {
-      if (isNaN(v.duration) || v.duration === Infinity) { v.currentTime = 0; }
-      else v.currentTime = Math.min(0.1, v.duration / 2);
-    }, { once: true });
+const revokeURLs = (items) => {
+    items.forEach(item => {
+        if (item.thumbUrl) URL.revokeObjectURL(item.thumbUrl);
+    });
+};
 
-    v.addEventListener('seeked', toImage, { once: true });
-    v.addEventListener('error', () => reject(new Error('video decode error')), { once: true });
-  });
-}
+// ---------- UI Update Functions ----------
+const setButtonsEnabled = () => {
+    const hasSelection = selection.length > 0;
+    btnInspect.disabled = !hasSelection;
+    btnClean.disabled = !hasSelection;
+    btnReset.disabled = !hasSelection;
+};
 
-// ---------- File input handling ----------
-drop.addEventListener('click', chooseFiles);
-drop.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') chooseFiles(); });
+const clearUI = () => {
+    outputSection.classList.add('hidden');
+    resultDownloads.classList.add('hidden');
+    inspectPane.classList.add('hidden');
+    singleResult.classList.add('hidden');
+    batchResult.classList.add('hidden');
+    
+    inspectBefore.textContent = '';
+    inspectAfter.textContent = '';
+    inspectDiff.textContent = '';
+    inspectSelect.innerHTML = '';
+    
+    if (downloadLink.href) URL.revokeObjectURL(downloadLink.href);
+    if (zipLink.href) URL.revokeObjectURL(zipLink.href);
 
-drop.addEventListener('dragover', (e) => {
-  e.preventDefault();
-  drop.classList.add('dragover');
-});
+    beforeReports.clear();
+    afterReports.clear();
+    cleanedMap.clear();
+};
 
-drop.addEventListener('dragleave', () => drop.classList.remove('dragover'));
+const renderFileList = () => {
+    fileListEl.innerHTML = selection.map((s, i) => `
+        <li class="file-chip" data-idx="${i}">
+            <span class="thumb">${iconFor(s.kind)}</span>
+            <span class="meta" title="${s.file.name}">${s.file.name} • ${fmtBytes(s.file.size)}</span>
+            <button class="remove" title="Remove" aria-label="Remove ${s.file.name}">&times;</button>
+        </li>`
+    ).join('');
+};
 
-drop.addEventListener('drop', (e) => {
-  e.preventDefault();
-  drop.classList.remove('dragover');
-  if (e.dataTransfer.files.length) {
-    setSelection([...e.dataTransfer.files]);
-  }
-});
+const updateInspectView = async () => {
+    const selectedFile = inspectSelect.value;
+    if (!selectedFile) return;
 
-input.addEventListener('change', () => {
-  if (input.files.length) setSelection([...input.files]);
-});
+    inspectBefore.textContent = beforeReports.get(selectedFile) || 'Report not available.';
+    
+    const cleanedName = cleanedMap.get(selectedFile);
+    const afterTab = document.querySelector('.tab[data-tab="after"]');
+    const diffTab = document.querySelector('.tab[data-tab="diff"]');
 
-// Handle file removal
-fileList.addEventListener('click', (e) => {
-  if (e.target.classList.contains('remove')) {
-    const li = e.target.closest('.filechip');
-    const idx = Number(li.dataset.idx);
-    revokeURLs([selection[idx]]);
-    selection.splice(idx, 1);
+    if (cleanedName) {
+        if (!afterReports.has(cleanedName)) {
+            statusEl.textContent = `Fetching report for ${cleanedName}...`;
+            try {
+                const res = await fetch(`/inspect-output/${encodeURIComponent(cleanedName)}`);
+                const json = await res.json();
+                afterReports.set(cleanedName, json.report || 'Failed to load report.');
+            } catch (e) {
+                afterReports.set(cleanedName, `<Inspect failed: ${e.message}>`);
+            }
+            statusEl.textContent = '';
+        }
+        
+        const beforeText = inspectBefore.textContent;
+        const afterText = afterReports.get(cleanedName) || '';
+        inspectAfter.textContent = afterText;
+        generateDiff(beforeText, afterText);
+        
+        afterTab.disabled = false;
+        diffTab.disabled = false;
+    } else {
+        inspectAfter.textContent = '';
+        inspectDiff.textContent = '';
+        afterTab.disabled = true;
+        diffTab.disabled = true;
+    }
+};
+
+const generateDiff = (before, after) => {
+    const beforeLines = new Set(before.split('\n'));
+    const afterLines = new Set(after.split('\n'));
+    let diffHtml = '';
+    
+    beforeLines.forEach(line => {
+        if (line.trim() && !afterLines.has(line)) {
+            diffHtml += `<span class="diff-line-removed">- ${line}</span>\n`;
+        }
+    });
+
+    if (!diffHtml) {
+        diffHtml = 'No metadata was removed.';
+    }
+
+    inspectDiff.innerHTML = diffHtml;
+};
+
+
+// ---------- File Selection & Handling ----------
+const handleFiles = (files) => {
+    revokeURLs(selection);
+    clearUI();
+    selection = [...files].map(file => ({ file, id: crypto.randomUUID(), kind: inferKind(file) }));
+    
     renderFileList();
     statusEl.textContent = `${selection.length} file(s) selected.`;
     setButtonsEnabled();
-    if (selection.length === 0) clearUI();
-  }
+    fileInput.value = '';
+};
+
+dropZone.addEventListener('click', () => fileInput.click());
+dropZone.addEventListener('dragover', (e) => {
+    e.preventDefault();
+    dropZone.classList.add('dragover');
+});
+dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
+dropZone.addEventListener('drop', (e) => {
+    e.preventDefault();
+    dropZone.classList.remove('dragover');
+    if (e.dataTransfer.files.length) {
+        handleFiles(e.dataTransfer.files);
+    }
+});
+fileInput.addEventListener('change', () => {
+    if (fileInput.files.length) handleFiles(fileInput.files);
 });
 
-// ---------- Selection handling ----------
-function setSelection(files) {
-  revokeURLs(selection); // Clean up old URLs
-  selection.push(...files.map(f => ({ file: f, id: crypto.randomUUID(), kind: inferKind(f) }))); // Append new files
-  renderFileList();
-  statusEl.textContent = `${selection.length} file(s) selected.`;
-  setButtonsEnabled();
-  clearUI();
-  input.value = ''; // allow reselecting same files later
+fileListEl.addEventListener('click', (e) => {
+    if (e.target.classList.contains('remove')) {
+        const idx = Number(e.target.closest('.file-chip').dataset.idx);
+        revokeURLs([selection[idx]]);
+        selection.splice(idx, 1);
+        
+        renderFileList();
+        statusEl.textContent = `${selection.length} file(s) selected.`;
+        setButtonsEnabled();
+        if (selection.length === 0) {
+            clearUI();
+            statusEl.textContent = 'No files selected.';
+        }
+    }
+});
 
-  selection.forEach(async (item, idx) => {
-    await buildThumb(item);
-    const li = fileList.querySelector(`li[data-idx="${idx}"]`);
-    if (li) renderFileList();
-  });
-}
 
-// ---------- Reset ----------
+// ---------- Action Button Handlers ----------
 btnReset.addEventListener('click', () => {
-  revokeURLs(selection);
-  selection = [];
-  renderFileList();
-  setButtonsEnabled();
-  clearUI();
-  statusEl.textContent = 'Selection cleared.';
-  inspectBefore.textContent = '';
-  inspectAfter.textContent = '';
-  inspectDiff.textContent = '';
-  inspectSelect.innerHTML = ''; // Clear the inspect file list
-  downloadLink.removeAttribute('href'); // Remove download link
-  zipLink.removeAttribute('href'); // Remove ZIP download link
+    revokeURLs(selection);
+    selection = [];
+    renderFileList();
+    setButtonsEnabled();
+    clearUI();
+    statusEl.textContent = 'No files selected.';
 });
 
-// ---------- Inspect (Before, After, Diff) ----------
-function setTabs() {
-  tabs.forEach(btn => {
-    btn.classList.remove('active');
-    const tab = btn.dataset.tab;
-    if (tab === "before") {
-      btn.classList.add('active');
-      panels.before.classList.add('show');
-      panels.after.classList.remove('show');
-      panels.diff.classList.remove('show');
-    } else if (tab === "after" && inspectAfter.textContent) {
-      btn.classList.add('active');
-      panels.before.classList.remove('show');
-      panels.after.classList.add('show');
-      panels.diff.classList.remove('show');
-    } else if (tab === "diff" && inspectDiff.textContent) {
-      btn.classList.add('active');
-      panels.before.classList.remove('show');
-      panels.after.classList.remove('show');
-      panels.diff.classList.add('show');
-    }
-  });
-}
-
-// "Inspect Before" behavior
 btnInspect.addEventListener('click', async () => {
-  if (!selection.length) return;
-  statusEl.textContent = `Inspecting ${selection.length} file(s) ...`;
-  beforeReports.clear();
-  
-  inspectSelect.innerHTML = ''; // Clear previous selections
-  for (const s of selection) {
-    const d = new FormData();
-    d.append('upload', s.file);
-    try {
-      const res = await fetch('/inspect', { method: 'POST', body: d });
-      const json = await res.json();
-      beforeReports.set(s.file.name, json.report || '');
-      const opt = document.createElement('option');
-      opt.value = s.file.name;
-      opt.textContent = s.file.name;
-      inspectSelect.appendChild(opt);
-    } catch (e) {
-      beforeReports.set(s.file.name, `<inspect failed: ${e.message}>`);
-    }
-  }
+    if (!selection.length) return;
+    statusEl.textContent = 'Inspecting files...';
+    btnInspect.disabled = true;
 
-  // Show Before and After content (if available)
-  inspectBefore.textContent = beforeReports.get(inspectSelect.value) || '';
-  inspectAfter.textContent = afterReports.get(inspectSelect.value) || '';
-  inspectDiff.textContent = ''; // Show diff only if file was cleaned
-  
-  inspectPane.classList.remove('hidden');
-  setTabs();
-  statusEl.textContent = '';
+    inspectSelect.innerHTML = '';
+    beforeReports.clear();
+    
+    await Promise.all(selection.map(async s => {
+        const formData = new FormData();
+        formData.append('upload', s.file);
+        try {
+            const res = await fetch('/inspect', { method: 'POST', body: formData });
+            const json = await res.json();
+            beforeReports.set(s.file.name, json.report || '');
+        } catch (e) {
+            beforeReports.set(s.file.name, `<Inspect failed: ${e.message}>`);
+        }
+    }));
+
+    selection.forEach(s => {
+        const opt = document.createElement('option');
+        opt.value = s.file.name;
+        opt.textContent = s.file.name;
+        inspectSelect.appendChild(opt);
+    });
+
+    outputSection.classList.remove('hidden');
+    inspectPane.classList.remove('hidden');
+    resultDownloads.classList.add('hidden'); // Ensure downloads are hidden
+    
+    await updateInspectView(); // Display first file's report
+    
+    statusEl.textContent = `Inspection complete for ${selection.length} file(s).`;
+    btnInspect.disabled = false;
 });
 
-btnInspectAfter.addEventListener('click', async () => {
-  const fileName = inspectSelect.value;
-  if (!fileName) return;
-  
-  const cleanedFile = cleanedMap.get(fileName);
-  if (!cleanedFile) { inspectAfter.textContent = '(no cleaned output found for this file)'; return; }
+btnClean.addEventListener('click', async () => {
+    if (selection.length === 0) return;
+    statusEl.textContent = `Cleaning ${selection.length} file(s)...`;
+    btnClean.disabled = true;
 
-  const res = await fetch(`/inspect-output/${encodeURIComponent(cleanedFile)}`);
-  const json = await res.json();
-  afterReports.set(cleanedFile, json.report || '');
-  inspectAfter.textContent = afterReports.get(cleanedFile) || '';
+    const formData = new FormData();
+    selection.forEach(s => formData.append('files', s.file));
+    
+    try {
+        const response = await fetch('/clean', { method: 'POST', body: formData });
+        if (!response.ok) throw new Error(`Server error: ${response.statusText}`);
+        
+        const blob = await response.blob();
+        const contentDisposition = response.headers.get('Content-Disposition');
+        const filenameMatch = contentDisposition?.match(/filename="(.+)"/);
+        const newName = filenameMatch ? filenameMatch[1] : 'cleaned-file';
+
+        if (selection.length === 1) {
+            downloadLink.href = URL.createObjectURL(blob);
+            downloadLink.download = newName;
+            cleanedMap.set(selection[0].file.name, newName);
+            singleResult.classList.remove('hidden');
+            batchResult.classList.add('hidden');
+        } else {
+            zipLink.href = URL.createObjectURL(blob);
+            zipLink.download = newName;
+            const cleanedFilesHeader = response.headers.get('X-Cleaned-Files');
+            if (cleanedFilesHeader) {
+                const cleanedFiles = JSON.parse(cleanedFilesHeader);
+                for (const [original, cleaned] of Object.entries(cleanedFiles)) {
+                    cleanedMap.set(original, cleaned);
+                }
+            }
+            singleResult.classList.add('hidden');
+            batchResult.classList.remove('hidden');
+        }
+        
+        outputSection.classList.remove('hidden');
+        resultDownloads.classList.remove('hidden');
+        inspectPane.classList.add('hidden'); // Hide inspect pane if it was open
+        statusEl.textContent = 'Cleaning complete!';
+
+    } catch (error) {
+        statusEl.textContent = `Error: ${error.message}`;
+    } finally {
+        btnClean.disabled = false;
+    }
+});
+
+// ---------- Inspect Panel Event Listeners ----------
+inspectSelect.addEventListener('change', updateInspectView);
+
+tabs.forEach(tab => {
+    tab.addEventListener('click', () => {
+        if (tab.disabled) return;
+        tabs.forEach(t => t.classList.remove('active'));
+        tab.classList.add('active');
+        Object.values(panels).forEach(p => p.classList.remove('show'));
+        panels[tab.dataset.tab].classList.add('show');
+    });
+});
+
+wrapToggle.addEventListener('change', () => {
+    document.querySelectorAll('.panel pre').forEach(pre => {
+        pre.classList.toggle('wrap', wrapToggle.checked);
+    });
 });
