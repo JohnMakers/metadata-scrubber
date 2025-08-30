@@ -153,8 +153,8 @@ function captureVideoFrame(objectURL){
 
 // ---------- Selection handling ----------
 function setSelection(files){
-  revokeURLs(selection);
-  selection = files.map(f => ({ file: f, id: crypto.randomUUID(), kind: inferKind(f) }));
+  revokeURLs(selection); // Clean up old URLs
+  selection.push(...files.map(f => ({ file: f, id: crypto.randomUUID(), kind: inferKind(f) }))); // Append new files
   renderFileList();
   statusEl.textContent = `${selection.length} file(s) selected.`;
   setButtonsEnabled();
@@ -189,4 +189,134 @@ btnReset.addEventListener('click', () => {
   setButtonsEnabled();
   clearUI();
   statusEl.textContent = 'Selection cleared.';
+});
+
+// ---------- Inspect (Before, After, Diff) ----------
+function setTabs() {
+  tabs.forEach(btn => {
+    btn.classList.remove('active');
+    const tab = btn.dataset.tab;
+    if (tab === "before") {
+      btn.classList.add('active');
+      panels.before.classList.add('show');
+      panels.after.classList.remove('show');
+      panels.diff.classList.remove('show');
+    } else if (tab === "after" && inspectAfter.textContent) {
+      btn.classList.add('active');
+      panels.before.classList.remove('show');
+      panels.after.classList.add('show');
+      panels.diff.classList.remove('show');
+    } else if (tab === "diff" && inspectDiff.textContent) {
+      btn.classList.add('active');
+      panels.before.classList.remove('show');
+      panels.after.classList.remove('show');
+      panels.diff.classList.add('show');
+    }
+  });
+}
+
+// "Inspect Before" behavior
+btnInspect.addEventListener('click', async () => {
+  if (!selection.length) return;
+  statusEl.textContent = `Inspecting ${selection.length} file(s) ...`;
+  beforeReports.clear();
+
+  // Fetch reports per file (and populate selector)
+  inspectSelect.innerHTML = '';
+  for (const s of selection) {
+    const d = new FormData();
+    d.append('upload', s.file);
+    try {
+      const res = await fetch('/inspect', { method: 'POST', body: d });
+      const json = await res.json();
+      beforeReports.set(s.file.name, json.report || '');
+      const opt = document.createElement('option');
+      opt.value = s.file.name;
+      opt.textContent = s.file.name;
+      inspectSelect.appendChild(opt);
+    } catch (e) {
+      beforeReports.set(s.file.name, `<inspect failed: ${e.message}>`);
+    }
+  }
+
+  // Show first file’s report
+  inspectBefore.textContent = beforeReports.get(inspectSelect.value) || '';
+  inspectAfter.textContent = '';
+  inspectDiff.textContent = ''; // Don't show Diff initially
+  inspectPane.classList.remove('hidden');
+  setTabs();
+  statusEl.textContent = '';
+});
+
+// eta
+
+let progressInterval;
+
+function startProgressTimer() {
+  let minutesRemaining = 5; // Example ETA, can be adjusted dynamically
+  let progress = 0;
+  statusEl.innerHTML = `⏳ Cleaning in progress... (${minutesRemaining} mins remaining)`;
+
+  progressInterval = setInterval(() => {
+    progress += 10;
+    statusEl.innerHTML = `⏳ Cleaning... ${progress}% complete. ${minutesRemaining} min remaining`;
+
+    if (progress >= 100) {
+      clearInterval(progressInterval);
+      statusEl.innerHTML = `✅ Cleaning complete!`;
+    }
+
+    minutesRemaining--;
+    if (minutesRemaining < 1) {
+      clearInterval(progressInterval);
+      statusEl.innerHTML = `❌ Cleaning failed (timeout).`;
+    }
+  }, 60000); // Update every minute for ETA
+}
+
+function stopProgressTimer() {
+  clearInterval(progressInterval);
+}
+
+btnClean.addEventListener('click', async () => {
+  if (!selection.length) return;
+  startProgressTimer();  // Start the progress animation
+  statusEl.textContent = `Cleaning ${selection.length} file(s)...`;
+
+  const data = new FormData();
+  for (const s of selection) data.append('uploads', s.file);
+
+  try {
+    const res = await fetch('/clean-batch', { method: 'POST', body: data });
+    if (!res.ok) throw new Error((await res.json()).detail || `Server error (${res.status})`);
+    const json = await res.json();
+    stopProgressTimer(); // Stop timer on completion
+
+    cleanedMap.clear();
+    if (json.items) {
+      for (const it of json.items) cleanedMap.set(it.orig, it.cleaned_name);
+    }
+
+    // Handle single file/batch output as before
+    if (json.download) {
+      singleResult.classList.remove('hidden');
+      batchResult.classList.add('hidden');
+      downloadLink.href = json.download;
+      downloadLink.setAttribute('download', json.suggested_filename || 'clean_file');
+      result.classList.remove('hidden');
+      statusEl.textContent = '';
+    } else {
+      batchResult.classList.remove('hidden');
+      singleResult.classList.add('hidden');
+      zipLink.href = json.zip_download;
+      listEl.innerHTML = json.items.map(it =>
+        `<div>• ${it.orig} → <a href="${it.download}">${it.cleaned_name}</a></div>`
+      ).join('');
+      result.classList.remove('hidden');
+      statusEl.textContent = '';
+    }
+  } catch (err) {
+    stopProgressTimer(); // Stop on error
+    statusEl.textContent = `❌ ${err.message}`;
+  }
 });
