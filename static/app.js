@@ -2,14 +2,13 @@
 const drop = document.getElementById('drop');
 const input = document.getElementById('file');
 const fileList = document.getElementById('fileList');
-
 const statusEl = document.getElementById('status');
 const result = document.getElementById('result');
 const singleResult = document.getElementById('singleResult');
 const downloadLink = document.getElementById('downloadLink');
+const zipLink = document.getElementById('zipLink');
 const btnInspectAfter = document.getElementById('btnInspectAfter');
 const batchResult = document.getElementById('batchResult');
-const zipLink = document.getElementById('zipLink');
 const listEl = document.getElementById('list');
 const btnInspect = document.getElementById('btnInspect');
 const btnClean = document.getElementById('btnClean');
@@ -89,7 +88,6 @@ function renderFileList() {
   }).join('');
 }
 
-// ---------- Thumbnail generation ----------
 async function buildThumb(item) {
   if (item.kind === 'image') {
     item.url = URL.createObjectURL(item.file);
@@ -101,11 +99,10 @@ async function buildThumb(item) {
     try {
       item.thumb = await captureVideoFrame(item.url);
     } catch {
-      item.thumb = ''; // If video decoding fails, leave empty thumbnail
+      item.thumb = '';
     }
   }
 }
-
 
 function captureVideoFrame(objectURL) {
   return new Promise((resolve, reject) => {
@@ -134,7 +131,6 @@ function captureVideoFrame(objectURL) {
 }
 
 // ---------- File input handling ----------
-// Enable dragging files onto the drop area
 drop.addEventListener('click', chooseFiles);
 drop.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') chooseFiles(); });
 
@@ -153,7 +149,6 @@ drop.addEventListener('drop', (e) => {
   }
 });
 
-// Handle file input change event
 input.addEventListener('change', () => {
   if (input.files.length) setSelection([...input.files]);
 });
@@ -197,8 +192,6 @@ btnReset.addEventListener('click', () => {
   setButtonsEnabled();
   clearUI();
   statusEl.textContent = 'Selection cleared.';
-
-  // Reset Inspect section
   inspectBefore.textContent = '';
   inspectAfter.textContent = '';
   inspectDiff.textContent = '';
@@ -206,7 +199,6 @@ btnReset.addEventListener('click', () => {
   downloadLink.removeAttribute('href'); // Remove download link
   zipLink.removeAttribute('href'); // Remove ZIP download link
 });
-
 
 // ---------- Inspect (Before, After, Diff) ----------
 function setTabs() {
@@ -276,78 +268,4 @@ btnInspectAfter.addEventListener('click', async () => {
   const json = await res.json();
   afterReports.set(cleanedFile, json.report || '');
   inspectAfter.textContent = afterReports.get(cleanedFile) || '';
-});
-
-
-
-// ETA Timer
-let progressInterval;
-
-function startProgressTimer() {
-  let minutesRemaining = 5; // Example ETA, can be adjusted dynamically
-  let progress = 0;
-  statusEl.innerHTML = `⏳ Cleaning in progress... (${minutesRemaining} mins remaining)`;
-
-  progressInterval = setInterval(() => {
-    progress += 10;
-    statusEl.innerHTML = `⏳ Cleaning... ${progress}% complete. ${minutesRemaining} min remaining`;
-
-    if (progress >= 100) {
-      clearInterval(progressInterval);
-      statusEl.innerHTML = `✅ Cleaning complete!`;
-    }
-
-    minutesRemaining--;
-    if (minutesRemaining < 1) {
-      clearInterval(progressInterval);
-      statusEl.innerHTML = `❌ Cleaning failed (timeout).`;
-    }
-  }, 60000); // Update every minute for ETA
-}
-
-function stopProgressTimer() {
-  clearInterval(progressInterval);
-}
-
-btnClean.addEventListener('click', async () => {
-  if (!selection.length) return;
-  startProgressTimer();  // Start the progress animation
-  statusEl.textContent = `Cleaning ${selection.length} file(s)...`;
-
-  const data = new FormData();
-  for (const s of selection) data.append('uploads', s.file);
-
-  try {
-    const res = await fetch('/clean-batch', { method: 'POST', body: data });
-    if (!res.ok) throw new Error((await res.json()).detail || `Server error (${res.status})`);
-    const json = await res.json();
-    stopProgressTimer(); // Stop timer on completion
-
-    cleanedMap.clear();
-    if (json.items) {
-      for (const it of json.items) cleanedMap.set(it.orig, it.cleaned_name);
-    }
-
-    // Handle single file/batch output as before
-    if (json.download) {
-      singleResult.classList.remove('hidden');
-      batchResult.classList.add('hidden');
-      downloadLink.href = json.download;
-      downloadLink.setAttribute('download', json.suggested_filename || 'clean_file');
-      result.classList.remove('hidden');
-      statusEl.textContent = '';
-    } else {
-      batchResult.classList.remove('hidden');
-      singleResult.classList.add('hidden');
-      zipLink.href = json.zip_download;
-      listEl.innerHTML = json.items.map(it =>
-        `<div>• ${it.orig} → <a href="${it.download}">${it.cleaned_name}</a></div>`
-      ).join('');
-      result.classList.remove('hidden');
-      statusEl.textContent = '';
-    }
-  } catch (err) {
-    stopProgressTimer(); // Stop on error
-    statusEl.textContent = `❌ ${err.message}`;
-  }
 });
