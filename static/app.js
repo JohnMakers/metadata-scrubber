@@ -32,11 +32,6 @@ const panels = {
 };
 
 // ---------- State ----------
-/*
- selection item shape:
- { file: File, id: string, kind: 'image' | 'video' | 'doc' | 'pdf' | 'other',
-   url?: string (objectURL), thumb?: string (dataURL for video or objectURL for image) }
-*/
 let selection = [];
 let beforeReports = new Map(); // name -> text
 let afterReports  = new Map(); // cleaned_name -> text
@@ -79,15 +74,14 @@ function setButtonsEnabled(){
 function revokeURLs(items){
   for (const s of items){
     if (s.url)   URL.revokeObjectURL(s.url);
-    // s.thumb for images equals s.url; do not revoke twice
   }
 }
 
 function renderFileList(){
-  fileList.innerHTML = selection.map((s, i) => {
+  fileList.innerHTML = selection.map((s,i) => {
     const thumb = s.thumb
-      ? `<img class="thumb${s.kind === 'video' ? ' video play' : ''}" src="${s.thumb}" alt="">`
-      : `<span class="thumb" aria-hidden="true" style="display:inline-grid; place-items:center; font-size:14px;">${iconFor(s.kind)}</span>`;
+      ? `<img class="thumb${s.kind==='video' ? ' video play' : ''}" src="${s.thumb}" alt="">`
+      : `<span class="thumb" aria-hidden="true" style="display:inline-grid;place-items:center;font-size:14px;">${iconFor(s.kind)}</span>`;
     return `
       <li class="filechip" data-idx="${i}">
         ${thumb}
@@ -96,7 +90,6 @@ function renderFileList(){
       </li>`;
   }).join('');
 }
-
 
 function clearUI(){
   result.classList.add('hidden');
@@ -117,22 +110,19 @@ function clearUI(){
 
 // ---------- Thumbnail generation ----------
 async function buildThumb(item){
-  // images: use objectURL directly
   if (item.kind === 'image'){
     item.url = URL.createObjectURL(item.file);
     item.thumb = item.url;
     return;
   }
-  // videos: capture a frame
   if (item.kind === 'video'){
     item.url = URL.createObjectURL(item.file);
     try{
       item.thumb = await captureVideoFrame(item.url);
     }catch{
-      item.thumb = ''; // fallback to icon
+      item.thumb = ''; 
     }
   }
-  // docs/pdf: no thumbnail, keep icon
 }
 
 function captureVideoFrame(objectURL){
@@ -163,7 +153,6 @@ function captureVideoFrame(objectURL){
 
 // ---------- Selection handling ----------
 function setSelection(files){
-  // cleanup old URLs
   revokeURLs(selection);
   selection = files.map(f => ({ file: f, id: crypto.randomUUID(), kind: inferKind(f) }));
   renderFileList();
@@ -172,10 +161,8 @@ function setSelection(files){
   clearUI();
   input.value = ''; // allow reselecting same files later
 
-  // build thumbs asynchronously, then rerender
   selection.forEach(async (item, idx) => {
     await buildThumb(item);
-    // If still present (not removed), rerender that chip
     const li = fileList.querySelector(`li[data-idx="${idx}"]`);
     if (li) renderFileList();
   });
@@ -193,151 +180,6 @@ fileList.addEventListener('click', (e) => {
     if (selection.length === 0) clearUI();
   }
 });
-
-// ---------- Drag & drop ----------
-drop.addEventListener('click', chooseFiles);
-drop.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') chooseFiles(); });
-drop.addEventListener('dragover', (e) => { e.preventDefault(); drop.classList.add('dragover'); });
-drop.addEventListener('dragleave', () => drop.classList.remove('dragover'));
-drop.addEventListener('drop', (e) => {
-  e.preventDefault(); drop.classList.remove('dragover');
-  if (e.dataTransfer.files.length) setSelection([...e.dataTransfer.files]);
-});
-input.addEventListener('change', () => { if (input.files.length) setSelection([...input.files]); });
-
-// ---------- Inspect BEFORE ----------
-btnInspect.addEventListener('click', async () => {
-  if (!selection.length) return;
-  statusEl.textContent = `Inspecting ${selection.length} file(s) ...`;
-  beforeReports.clear();
-
-  inspectSelect.innerHTML = '';
-  for (const s of selection){
-    const d = new FormData(); d.append('upload', s.file);
-    try{
-      const res = await fetch('/inspect', { method: 'POST', body: d });
-      const json = await res.json();
-      beforeReports.set(s.file.name, json.report || '');
-      const opt = document.createElement('option');
-      opt.value = s.file.name; opt.textContent = s.file.name;
-      inspectSelect.appendChild(opt);
-    }catch(e){
-      beforeReports.set(s.file.name, `<inspect failed: ${e.message}>`);
-    }
-  }
-  inspectBefore.textContent = beforeReports.get(inspectSelect.value) || '';
-  inspectAfter.textContent = '';
-  inspectDiff.textContent = '';
-  inspectPane.classList.remove('hidden');
-  statusEl.textContent = '';
-});
-
-// Change inspected file
-inspectSelect.addEventListener('change', () => {
-  inspectBefore.textContent = beforeReports.get(inspectSelect.value) || '';
-  const cleaned = cleanedMap.get(inspectSelect.value);
-  inspectAfter.textContent = cleaned ? (afterReports.get(cleaned) || '(not inspected yet)') : '(clean the file first)';
-  buildDiff();
-});
-
-// Wrap toggle
-wrapToggle?.addEventListener('change', () => {
-  for (const pre of [inspectBefore, inspectAfter, inspectDiff]){
-    pre.classList.toggle('wrap', wrapToggle.checked);
-  }
-});
-
-// Tabs (mobile)
-tabs.forEach(btn => {
-  btn.addEventListener('click', () => {
-    tabs.forEach(b => b.classList.remove('active'));
-    btn.classList.add('active');
-    const tab = btn.dataset.tab;
-    Object.keys(panels).forEach(k => panels[k].classList.toggle('show', k === tab));
-  });
-});
-
-// ---------- Clean (batch) ----------
-btnClean.addEventListener('click', async () => {
-  if (!selection.length) return;
-  statusEl.textContent = `Cleaning ${selection.length} file(s)...`;
-  result.classList.add('hidden');
-
-  const data = new FormData();
-  for (const s of selection) data.append('uploads', s.file);
-
-  try {
-    const res = await fetch('/clean-batch', { method: 'POST', body: data });
-    if (!res.ok) throw new Error((await res.json()).detail || `Server error (${res.status})`);
-    const json = await res.json();
-    lastCleaned = json;
-
-    cleanedMap.clear();
-    if (json.items){
-      for (const it of json.items) cleanedMap.set(it.orig, it.cleaned_name);
-    }
-
-    if (json.download) {
-      singleResult.classList.remove('hidden');
-      batchResult.classList.add('hidden');
-      downloadLink.href = json.download;
-      downloadLink.setAttribute('download', json.suggested_filename || 'clean_file');
-      result.classList.remove('hidden');
-      statusEl.textContent = '';
-    } else {
-      batchResult.classList.remove('hidden');
-      singleResult.classList.add('hidden');
-      zipLink.href = json.zip_download;
-      listEl.innerHTML = json.items.map(it =>
-        `<div>• ${it.orig} → <a href="${it.download}">${it.cleaned_name}</a></div>`
-      ).join('');
-      result.classList.remove('hidden');
-      statusEl.textContent = '';
-    }
-  } catch (err) {
-    statusEl.textContent = `❌ ${err.message}`;
-  }
-});
-
-// Inspect AFTER (for current selected file)
-btnInspectAfter.addEventListener('click', async () => {
-  let origName = inspectSelect.value || (lastCleaned?.items?.[0]?.orig);
-  if (!origName) return;
-  const cleaned = cleanedMap.get(origName);
-  if (!cleaned) { inspectAfter.textContent = '(no cleaned output found for this file)'; return; }
-
-  const res = await fetch(`/inspect-output/${encodeURIComponent(cleaned)}`);
-  const json = await res.json();
-  afterReports.set(cleaned, json.report || '');
-  inspectAfter.textContent = afterReports.get(cleaned) || '';
-  buildDiff();
-  // Show After tab on mobile
-  tabs.forEach(b => b.classList.remove('active'));
-  document.querySelector('.tab[data-tab="after"]').classList.add('active');
-  panels.before.classList.remove('show');
-  panels.after.classList.add('show');
-  panels.diff.classList.remove('show');
-});
-
-function buildDiff(){
-  const before = inspectBefore.textContent || '';
-  const after  = inspectAfter.textContent || '';
-  const b = new Set(before.split(/\r?\n/).filter(Boolean));
-  const a = new Set(after.split(/\r?\n/).filter(Boolean));
-  const removed = [...b].filter(line => !a.has(line));
-  
-  if (removed.length === 0){
-    inspectDiff.textContent = '(no differences found)';
-  } else {
-    // Highlight removed lines in red (and added lines in green)
-    inspectDiff.innerHTML = removed.map(l => `<span class="diff-line">${escapeHtml(l)}</span>`).join('\n');
-  }
-}
-
-function escapeHtml(s){
-  return s.replace(/[&<>]/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[ch]));
-}
-
 
 // ---------- Reset ----------
 btnReset.addEventListener('click', () => {
