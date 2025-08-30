@@ -131,6 +131,9 @@ const clearUI = () => {
     beforeReports.clear();
     afterReports.clear();
     cleanedMap.clear();
+
+    // **CHANGE**: Reset button text
+    btnInspect.textContent = 'Inspect Original';
 };
 
 const renderFileList = () => {
@@ -199,25 +202,23 @@ const generateDiff = (before, after) => {
     inspectDiff.innerHTML = diffHtml;
 };
 
-
 // ---------- File Selection & Handling ----------
 const handleFiles = (files) => {
-    clearUI(); // Clear results from previous actions
+    clearUI();
     const newItems = [...files].map(file => ({ 
         file, 
         id: crypto.randomUUID(), 
         kind: inferKind(file),
-        thumb: `<span class="thumb">${iconFor(inferKind(file))}</span>` // Default icon
+        thumb: `<span class="thumb">${iconFor(inferKind(file))}</span>`
     }));
 
-    selection.push(...newItems); // Append new files instead of replacing
+    selection.push(...newItems);
     
-    renderFileList(); // Initial render with icons
+    renderFileList();
     statusEl.textContent = `${selection.length} file(s) selected.`;
     setButtonsEnabled();
     fileInput.value = '';
 
-    // Asynchronously build thumbnails and re-render
     newItems.forEach(async (item) => {
         await buildThumb(item);
         renderFileList();
@@ -256,7 +257,6 @@ fileListEl.addEventListener('click', (e) => {
         }
     }
 });
-
 
 // ---------- Action Button Handlers ----------
 btnReset.addEventListener('click', () => {
@@ -311,10 +311,10 @@ btnClean.addEventListener('click', async () => {
     btnClean.disabled = true;
 
     const formData = new FormData();
-    selection.forEach(s => formData.append('uploads', s.file)); // Changed to 'uploads'
+    selection.forEach(s => formData.append('uploads', s.file));
     
     try {
-        const response = await fetch('/clean-batch', { method: 'POST', body: formData }); // Changed to /clean-batch
+        const response = await fetch('/clean-batch', { method: 'POST', body: formData });
         if (!response.ok) {
             const err = await response.json();
             throw new Error(err.detail || `Server error: ${response.statusText}`);
@@ -322,27 +322,63 @@ btnClean.addEventListener('click', async () => {
         
         const result = await response.json();
 
-        // Populate cleanedMap for inspection
         result.items.forEach(item => {
             cleanedMap.set(item.orig, item.cleaned_name);
         });
 
-        if (result.zip_download) { // Batch result
+        if (result.zip_download) {
             zipLink.href = result.zip_download;
             zipLink.download = result.zip_download.split('/').pop();
             singleResult.classList.add('hidden');
             batchResult.classList.remove('hidden');
-        } else { // Single file result
+        } else {
             downloadLink.href = result.download;
             downloadLink.download = result.suggested_filename;
             singleResult.classList.remove('hidden');
             batchResult.classList.add('hidden');
         }
         
+        // --- NEW LOGIC STARTS HERE ---
+        
+        // 1. Show both downloads and inspect pane
         outputSection.classList.remove('hidden');
         resultDownloads.classList.remove('hidden');
-        inspectPane.classList.add('hidden'); 
+        inspectPane.classList.remove('hidden');
+
+        // 2. Change the inspect button text
+        btnInspect.textContent = 'Inspect Results';
+        
+        // 3. Ensure "before" reports are loaded, in case user only clicked "Clean"
+        if (beforeReports.size === 0) {
+            statusEl.textContent = 'Fetching original reports for comparison...';
+            await Promise.all(selection.map(async s => {
+                const formData = new FormData();
+                formData.append('upload', s.file);
+                try {
+                    const res = await fetch('/inspect', { method: 'POST', body: formData });
+                    const json = await res.json();
+                    beforeReports.set(s.file.name, json.report || '');
+                } catch (e) {
+                    beforeReports.set(s.file.name, `<Inspect failed: ${e.message}>`);
+                }
+            }));
+        }
+
+        // 4. Populate inspect dropdown if it's empty
+        if (inspectSelect.options.length === 0) {
+            selection.forEach(s => {
+                const opt = document.createElement('option');
+                opt.value = s.file.name;
+                opt.textContent = s.file.name;
+                inspectSelect.appendChild(opt);
+            });
+        }
+        
+        // 5. Update the view to show before/after/diff
+        await updateInspectView();
+
         statusEl.textContent = 'Cleaning complete!';
+        // --- NEW LOGIC ENDS HERE ---
 
     } catch (error) {
         statusEl.textContent = `Error: ${error.message}`;
@@ -350,6 +386,7 @@ btnClean.addEventListener('click', async () => {
         btnClean.disabled = false;
     }
 });
+
 
 // ---------- Inspect Panel Event Listeners ----------
 inspectSelect.addEventListener('change', updateInspectView);
