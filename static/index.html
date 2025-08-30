@@ -1,64 +1,78 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Metadata Scrubber</title>
-  <link rel="stylesheet" href="static/styles.css">
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Metadata Scrubber</title>
+    <link rel="stylesheet" href="static/styles.css">
 </head>
 <body>
-  <div class="container">
-    <h1>Metadata Scrubber</h1>
+    <div class="app-container">
+        <header>
+            <h1>Metadata Scrubber</h1>
+        </header>
 
-    <!-- Drag and Drop Area -->
-    <div id="drop" class="drop" tabindex="0">
-      <p>Drop files here or click to choose</p>
+        <main>
+            <section class="card" id="upload-section">
+                <h2>1. Select Files</h2>
+                <div id="drop" class="drop-zone" tabindex="0">
+                    <p>Drop files here or click to select</p>
+                    <input type="file" id="file-input" multiple hidden>
+                </div>
+                <div class="status-bar">
+                    <p id="status">No files selected.</p>
+                    <ul id="file-list" class="file-list"></ul>
+                </div>
+            </section>
+
+            <section class="card" id="actions-section">
+                <h2>2. Process Files</h2>
+                <div class="actions">
+                    <button id="btn-inspect" class="button" disabled>Inspect Original</button>
+                    <button id="btn-clean" class="button" disabled>Clean Metadata</button>
+                    <button id="btn-reset" class="button button-secondary" disabled>Reset</button>
+                </div>
+            </section>
+
+            <section class="card hidden" id="output-section">
+                <div id="result-downloads" class="hidden">
+                    <h2>3. Download</h2>
+                    <div id="single-result" class="hidden">
+                        <a id="download-link" class="button" href="#" download>Download Cleaned File</a>
+                    </div>
+                    <div id="batch-result" class="hidden">
+                        <a id="zip-link" class="button" href="#" download>Download All as .ZIP</a>
+                    </div>
+                </div>
+
+                <div id="inspect-pane" class="hidden">
+                    <h2>Inspection Report</h2>
+                    <div class="inspect-controls">
+                        <select id="inspect-select" aria-label="Select file to inspect"></select>
+                        <label class="wrap-toggle-label">
+                            <input type="checkbox" id="wrap-toggle"> Wrap text
+                        </label>
+                    </div>
+                    <div class="tabs">
+                        <button class="tab active" data-tab="before">Before</button>
+                        <button class="tab" data-tab="after" disabled>After</button>
+                        <button class="tab" data-tab="diff" disabled>Diff</button>
+                    </div>
+                    <div class="panels">
+                        <div id="panel-before" class="panel show">
+                            <pre id="inspect-before"></pre>
+                        </div>
+                        <div id="panel-after" class="panel">
+                            <pre id="inspect-after"></pre>
+                        </div>
+                        <div id="panel-diff" class="panel">
+                            <pre id="inspect-diff"></pre>
+                        </div>
+                    </div>
+                </div>
+            </section>
+        </main>
     </div>
-
-    <!-- File List -->
-    <ul id="fileList" class="filelist"></ul>
-
-    <!-- Inspecting/Processing -->
-    <div id="status" class="status"></div>
-
-    <!-- Inspect Tabs -->
-    <div class="tabs">
-      <button class="tab active" data-tab="before">Inspect Before</button>
-      <button class="tab" data-tab="after">Inspect After</button>
-      <button class="tab" data-tab="diff">Only Removed</button>
-    </div>
-    
-    <!-- Inspect Section -->
-    <div id="inspectPane" class="inspect hidden">
-      <select id="inspectSelect"></select>
-      <div id="panel-before" class="panel show">
-        <pre id="inspectBefore"></pre>
-      </div>
-      <div id="panel-after" class="panel">
-        <pre id="inspectAfter"></pre>
-      </div>
-      <div id="panel-diff" class="panel">
-        <pre id="inspectDiff"></pre>
-      </div>
-    </div>
-
-    <!-- Results -->
-    <div id="result" class="hidden">
-      <div id="singleResult">
-        <button id="downloadLink">Download Clean File</button>
-      </div>
-      <div id="batchResult" class="hidden">
-        <button id="zipLink">Download ZIP</button>
-      </div>
-    </div>
-
-    <!-- Actions -->
-    <div class="actions">
-      <button id="btnInspect" class="button">Inspect</button>
-      <button id="btnClean" class="button">Clean</button>
-      <button id="btnReset" class="button">Start Over</button>
-    </div>
-  </div>
-  <script src="static/app.js"></script>
+    <script src="static/app.js"></script>
 </body>
 </html>
