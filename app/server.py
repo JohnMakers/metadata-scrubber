@@ -19,12 +19,10 @@ from app.cleaners.pdfs import clean_pdf
 
 app = FastAPI(title="Aintivirus Metadata Remover (MVP)")
 
-# Serve static frontend
 app.mount("/static", StaticFiles(directory=str(Path(__file__).resolve().parent.parent / "static")), name="static")
 
 @app.on_event("startup")
 def bootstrap():
-    # Start background cleaner
     start_background_cleanup(interval_seconds=120)
 
 @app.get("/", response_class=HTMLResponse)
@@ -35,9 +33,18 @@ def home():
 def _secure_ext(filename: str) -> str:
     return Path(filename).suffix.lower()
 
-def _enforce_size_limit(data: bytes) -> None:
+async def _validate_and_read(upload_file: UploadFile):
+    ext = _secure_ext(upload_file.filename)
+    if ext not in ALLOWED_EXTENSIONS:
+        return None, f"Extension {ext} not allowed."
+    
+    data = await upload_file.read()
+    
     if len(data) > MAX_FILE_SIZE:
-        raise HTTPException(status_code=413, detail=f"File too large. Limit is {MAX_FILE_SIZE} bytes.")
+        return None, f"File too large. Limit is {MAX_FILE_SIZE} bytes."
+        
+    _verify_signature(data, upload_file.filename)
+    return data, None
 
 def _verify_signature(data: bytes, filename: str) -> None:
     claimed = Path(filename).suffix.lower()
@@ -51,7 +58,7 @@ def _verify_signature(data: bytes, filename: str) -> None:
         )
 
 def _choose_cleaner(ext: str):
-    if ext in {".jpg", ".jpeg", ".png", ".gif", ".tif", ".tiff"}:
+    if ext in {".jpg", ".jpeg", ".png", ".gif", ".tif", ".tiff", ".webp"}: # <-- .webp ADDED HERE
         return "image"
     if ext in {".docx", ".xlsx"}:
         return "office"
@@ -59,7 +66,7 @@ def _choose_cleaner(ext: str):
         return "pdf"
     if ext in {".mp4", ".mov", ".m4v", ".avi", ".mkv", ".webm"}:
         return "video"
-    raise HTTPException(status_code=400, detail="Unsupported file type for this MVP.")
+    return None
 
 @app.post("/clean-batch")
 async def clean_batch(uploads: List[UploadFile] = File(...)):
@@ -69,45 +76,43 @@ async def clean_batch(uploads: List[UploadFile] = File(...)):
     results = []
     uid = uuid.uuid4().hex
     for up in uploads:
+        data, error_detail = await _validate_and_read(up)
+        if error_detail:
+            # For simplicity in a batch, we can skip failed files. 
+            # In a real app, you might return specific errors per file.
+            continue 
+
         ext = _secure_ext(up.filename)
-        if ext not in ALLOWED_EXTENSIONS:
-            # Skip invalid files in a batch context or raise an error
-            continue
-
-        data = await up.read()
-        _enforce_size_limit(data)
-        _verify_signature(data, up.filename)
-
         src_path = UPLOAD_DIR / f"{uid}_{uuid.uuid4().hex}{ext}"
         dst_path = OUTPUT_DIR / f"{uid}_{Path(up.filename).stem}_clean{ext}"
         src_path.write_bytes(data)
 
         try:
-            cleaner = _choose_cleaner(ext)
-            if cleaner == "image":
+            cleaner_type = _choose_cleaner(ext)
+            if cleaner_type == "image":
                 clean_image(src_path, dst_path)
-            elif cleaner == "office":
+            elif cleaner_type == "office":
                 clean_office(src_path, dst_path)
-            elif cleaner == "pdf":
+            elif cleaner_type == "pdf":
                 clean_pdf(src_path, dst_path)
-            elif cleaner == "video":
+            elif cleaner_type == "video":
                 clean_video(src_path, dst_path)
-            
+            else:
+                continue # Skip unsupported but allowed types
+
             results.append({
                 "orig": up.filename,
                 "cleaned_name": dst_path.name,
                 "download": f"/download/{dst_path.name}"
             })
         except Exception as e:
-            # Optionally log the error and continue with other files
-            print(f"Failed to clean {up.filename}: {e}")
+            print(f"Error cleaning {up.filename}: {e}") # Log error
         finally:
             cleanup_once()
 
     if not results:
-         raise HTTPException(status_code=400, detail="All uploaded files were invalid or failed to process.")
+        raise HTTPException(status_code=400, detail="All uploaded files were invalid or failed to process.")
 
-    # Single file success: mirror /clean response for convenience
     if len(results) == 1:
         item = results[0]
         return {
@@ -116,7 +121,6 @@ async def clean_batch(uploads: List[UploadFile] = File(...)):
             "items": results
         }
 
-    # Multiple: build a ZIP in outputs
     zip_name = f"{uid}_cleaned_files.zip"
     zip_path = OUTPUT_DIR / zip_name
     with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as z:
@@ -131,11 +135,10 @@ async def clean_batch(uploads: List[UploadFile] = File(...)):
         "count": len(results)
     }
 
-
 @app.post("/inspect")
 async def inspect(upload: UploadFile = File(...)):
-    ext = Path(upload.filename).suffix.lower()
     data = await upload.read()
+    ext = _secure_ext(upload.filename)
     tmp = UPLOAD_DIR / f"inspect_{uuid.uuid4().hex}{ext}"
     tmp.write_bytes(data)
     try:
@@ -150,7 +153,7 @@ async def inspect(upload: UploadFile = File(...)):
 @app.get("/download/{name}")
 def download(name: str):
     path = OUTPUT_DIR / name
-    if not path.is_file(): # More secure check
+    if not path.is_file():
         raise HTTPException(status_code=404, detail="File not found (maybe it expired and was deleted).")
     return FileResponse(path, media_type="application/octet-stream", filename=name)
 
