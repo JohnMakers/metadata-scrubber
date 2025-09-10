@@ -11,7 +11,7 @@ UPLOAD_DIR.mkdir(exist_ok=True)
 OUTPUT_DIR.mkdir(exist_ok=True)
 
 MAX_FILE_SIZE = int(os.getenv("MAX_FILE_SIZE", 500 * 1024 * 1024))
-RETENTION = timedelta(minutes=20)
+RETENTION = timedelta(minutes=2)
 
 # Allowed extensions (v2 includes videos)
 ALLOWED_EXTENSIONS = {
@@ -19,3 +19,4 @@ ALLOWED_EXTENSIONS = {
     ".docx", ".xlsx", ".pdf",
     ".mp4", ".mov", ".m4v", ".avi", ".mkv", ".webm"
 }
+
